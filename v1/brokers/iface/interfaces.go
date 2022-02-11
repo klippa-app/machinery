@@ -17,6 +17,7 @@ type Broker interface {
 	Publish(ctx context.Context, task *tasks.Signature) error
 	GetPendingTasks(queue string) ([]*tasks.Signature, error)
 	GetDelayedTasks() ([]*tasks.Signature, error)
+	CancelDelayedTask(taskUUID string) error
 	AdjustRoutingKey(s *tasks.Signature)
 }
 
