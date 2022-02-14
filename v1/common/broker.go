@@ -95,6 +95,11 @@ func (b *Broker) GetDelayedTasks() ([]*tasks.Signature, error) {
 	return nil, errors.New("Not implemented")
 }
 
+// CancelDelayedTask removes a scheduled task with given UUID, so that is not picked up by the queue later
+func (b *Broker) CancelDelayedTask(taskUUID string) error {
+	return errors.New("Not implemented")
+}
+
 // StartConsuming is a common part of StartConsuming method
 func (b *Broker) StartConsuming(consumerTag string, concurrency int, taskProcessor iface.TaskProcessor) {
 	if b.retryFunc == nil {

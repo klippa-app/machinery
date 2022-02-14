@@ -1,6 +1,7 @@
 package tasks
 
 import (
+	"encoding/json"
 	"fmt"
 	"github.com/RichardKnop/machinery/v1/utils"
 	"time"
@@ -93,4 +94,8 @@ func CopySignature(signature *Signature) *Signature {
 	var sig = new(Signature)
 	_ = utils.DeepCopy(sig, signature)
 	return sig
+}
+
+func (s Signature) ToJSONByte() ([]byte, error) {
+	return json.Marshal(&s)
 }

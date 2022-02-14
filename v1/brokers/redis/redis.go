@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"runtime"
@@ -271,6 +272,36 @@ func (b *Broker) GetDelayedTasks() ([]*tasks.Signature, error) {
 		taskSignatures[i] = signature
 	}
 	return taskSignatures, nil
+}
+
+func (b *Broker) GetDelayedTask(taskUUID string) (*tasks.Signature, error) {
+	delayedTasks, err := b.GetDelayedTasks()
+	if err != nil {
+		return nil, err
+	}
+
+	for _, task := range delayedTasks {
+		if task != nil && task.UUID == taskUUID {
+			return task, nil
+		}
+	}
+
+	return nil, errors.New("Not found")
+}
+
+func (b *Broker) CancelDelayedTask(taskUUID string) error {
+	conn := b.open()
+	defer conn.Close()
+
+	task, err := b.GetDelayedTask(taskUUID)
+	if err != nil {
+		return err
+	}
+
+	taskBytes, err := task.ToJSONByte()
+	_, err = conn.Do("ZREM", b.redisDelayedTasksKey, taskBytes)
+
+	return err
 }
 
 // consume takes delivered messages from the channel and manages a worker pool
