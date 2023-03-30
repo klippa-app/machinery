@@ -247,6 +247,28 @@ func (b *Broker) GetPendingTasks(queue string) ([]*tasks.Signature, error) {
 	return taskSignatures, nil
 }
 
+// GetPendingTaskCount returns the number of tasks waiting in the queue
+func (b *Broker) GetPendingTaskCount(queue string) (int64, error) {
+	conn := b.open()
+	defer conn.Close()
+
+	if queue == "" {
+		queue = b.GetConfig().DefaultQueue
+	}
+
+	dataBytes, err := conn.Do("LLEN", queue)
+	if err != nil {
+		return 0, err
+	}
+
+	count, err := redis.Int64(dataBytes, err)
+	if err != nil {
+		return 0, err
+	}
+
+	return count, nil
+}
+
 // GetDelayedTasks returns a slice of task signatures that are scheduled, but not yet in the queue
 func (b *Broker) GetDelayedTasks() ([]*tasks.Signature, error) {
 	conn := b.open()
