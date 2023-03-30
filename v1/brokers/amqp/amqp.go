@@ -56,13 +56,13 @@ func (b *Broker) StartConsuming(consumerTag string, concurrency int, taskProcess
 		b.GetConfig().Broker,
 		b.GetConfig().MultipleBrokerSeparator,
 		b.GetConfig().TLSConfig,
-		b.GetConfig().AMQP.Exchange,     // exchange name
-		b.GetConfig().AMQP.ExchangeType, // exchange type
-		queueName,                       // queue name
-		true,                            // queue durable
-		false,                           // queue delete when unused
-		b.GetConfig().AMQP.BindingKey,   // queue binding key
-		nil,                             // exchange declare args
+		b.GetConfig().AMQP.Exchange,                     // exchange name
+		b.GetConfig().AMQP.ExchangeType,                 // exchange type
+		queueName,                                       // queue name
+		true,                                            // queue durable
+		false,                                           // queue delete when unused
+		b.GetConfig().AMQP.BindingKey,                   // queue binding key
+		nil,                                             // exchange declare args
 		amqp.Table(b.GetConfig().AMQP.QueueDeclareArgs), // queue declare args
 		amqp.Table(b.GetConfig().AMQP.QueueBindingArgs), // queue binding args
 	)
@@ -212,8 +212,8 @@ func (b *Broker) Publish(ctx context.Context, signature *tasks.Signature) error 
 
 	connection, err := b.GetOrOpenConnection(
 		queue,
-		bindingKey, // queue binding key
-		nil,        // exchange declare args
+		bindingKey,                                      // queue binding key
+		nil,                                             // exchange declare args
 		amqp.Table(b.GetConfig().AMQP.QueueDeclareArgs), // queue declare args
 		amqp.Table(b.GetConfig().AMQP.QueueBindingArgs), // queue binding args
 	)
@@ -376,14 +376,14 @@ func (b *Broker) delay(signature *tasks.Signature, delayMs int64) error {
 		b.GetConfig().Broker,
 		b.GetConfig().MultipleBrokerSeparator,
 		b.GetConfig().TLSConfig,
-		b.GetConfig().AMQP.Exchange,     // exchange name
-		b.GetConfig().AMQP.ExchangeType, // exchange type
-		queueName,                       // queue name
-		true,                            // queue durable
-		b.GetConfig().AMQP.AutoDelete,   // queue delete when unused
-		queueName,                       // queue binding key
-		nil,                             // exchange declare args
-		declareQueueArgs,                // queue declare args
+		b.GetConfig().AMQP.Exchange,                     // exchange name
+		b.GetConfig().AMQP.ExchangeType,                 // exchange type
+		queueName,                                       // queue name
+		true,                                            // queue durable
+		b.GetConfig().AMQP.AutoDelete,                   // queue delete when unused
+		queueName,                                       // queue binding key
+		nil,                                             // exchange declare args
+		declareQueueArgs,                                // queue declare args
 		amqp.Table(b.GetConfig().AMQP.QueueBindingArgs), // queue binding args
 	)
 	if err != nil {
@@ -460,8 +460,8 @@ func (b *Broker) GetPendingTasks(queue string) ([]*tasks.Signature, error) {
 	bindingKey := b.GetConfig().AMQP.BindingKey // queue binding key
 	conn, err := b.GetOrOpenConnection(
 		queue,
-		bindingKey, // queue binding key
-		nil,        // exchange declare args
+		bindingKey,                                      // queue binding key
+		nil,                                             // exchange declare args
 		amqp.Table(b.GetConfig().AMQP.QueueDeclareArgs), // queue declare args
 		amqp.Table(b.GetConfig().AMQP.QueueBindingArgs), // queue binding args
 	)
@@ -489,4 +489,30 @@ func (b *Broker) GetPendingTasks(queue string) ([]*tasks.Signature, error) {
 	}
 
 	return dumper.Signatures, nil
+}
+
+func (b *Broker) GetPendingTaskCount(queue string) (int64, error) {
+	if queue == "" {
+		queue = b.GetConfig().DefaultQueue
+	}
+
+	bindingKey := b.GetConfig().AMQP.BindingKey // queue binding key
+	conn, err := b.GetOrOpenConnection(
+		queue,
+		bindingKey,                                      // queue binding key
+		nil,                                             // exchange declare args
+		amqp.Table(b.GetConfig().AMQP.QueueDeclareArgs), // queue declare args
+		amqp.Table(b.GetConfig().AMQP.QueueBindingArgs), // queue binding args
+	)
+	if err != nil {
+		return 0, errors.Wrapf(err, "Failed to get a connection for queue %s", queue)
+	}
+
+	channel := conn.channel
+	queueInfo, err := channel.QueueInspect(queue)
+	if err != nil {
+		return 0, errors.Wrapf(err, "Failed to get info for queue %s", queue)
+	}
+
+	return int64(queueInfo.Messages), nil
 }

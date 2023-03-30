@@ -90,6 +90,11 @@ func (b *Broker) GetPendingTasks(queue string) ([]*tasks.Signature, error) {
 	return nil, errors.New("Not implemented")
 }
 
+// GetPendingTaskCount returns the number of tasks waiting in the queue
+func (b *Broker) GetPendingTaskCount(queue string) (int64, error) {
+	return 0, errors.New("Not implemented")
+}
+
 // GetDelayedTasks returns a slice of task.Signatures that are scheduled, but not yet in the queue
 func (b *Broker) GetDelayedTasks() ([]*tasks.Signature, error) {
 	return nil, errors.New("Not implemented")
