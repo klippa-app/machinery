@@ -337,9 +337,10 @@ func (b *Broker) consumeOne(delivery []byte, taskProcessor iface.TaskProcessor) 
 	// there might be different workers for processing specific tasks
 	if !b.IsTaskRegistered(signature.Name) {
 		if signature.IgnoreWhenTaskNotRegistered {
+			log.ERROR.Printf("Task not registered with this worker. Not requeuing task type %s with UUID %s in queue %s", signature.Name, signature.UUID, signature.RoutingKey)
 			return nil
 		}
-		log.INFO.Printf("Task not registered with this worker. Requeuing message: %s", delivery)
+		log.INFO.Printf("Task not registered with this worker. Requeuing task type %s with UUID %s in queue %s", signature.Name, signature.UUID, signature.RoutingKey)
 		b.requeueMessage(delivery, taskProcessor)
 		return nil
 	}
