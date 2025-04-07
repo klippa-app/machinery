@@ -85,6 +85,7 @@ type AMQPConfig struct {
 	BindingKey       string           `yaml:"binding_key" envconfig:"AMQP_BINDING_KEY"`
 	PrefetchCount    int              `yaml:"prefetch_count" envconfig:"AMQP_PREFETCH_COUNT"`
 	AutoDelete       bool             `yaml:"auto_delete" envconfig:"AMQP_AUTO_DELETE"`
+	DelayedQueue     string           `yaml:"delayed_queue" envconfig:"AMQP_DELAYED_QUEUE"`
 }
 
 // DynamoDBConfig wraps DynamoDB related configuration
@@ -149,6 +150,8 @@ type RedisConfig struct {
 
 	// MasterName specifies a redis master name in order to configure a sentinel-backed redis FailoverClient
 	MasterName string `yaml:"master_name" envconfig:"REDIS_MASTER_NAME"`
+	// ClusterMode specifies machinery should use redis cluster client explicitly
+	ClusterMode bool `yaml:"cluster_mode" envconfig:"REDIS_CLUSTER_MODE"`
 }
 
 // GCPPubSubConfig wraps GCP PubSub related configuration
