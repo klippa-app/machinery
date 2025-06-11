@@ -21,7 +21,7 @@ import (
 	backendsiface "github.com/RichardKnop/machinery/v1/backends/iface"
 	brokersiface "github.com/RichardKnop/machinery/v1/brokers/iface"
 	lockiface "github.com/RichardKnop/machinery/v1/locks/iface"
-	opentracing "github.com/opentracing/opentracing-go"
+	"github.com/opentracing/opentracing-go"
 )
 
 // Server is the main Machinery object and stores all configuration
@@ -353,22 +353,26 @@ func (server *Server) GetRegisteredTaskNames() []string {
 	return taskNames
 }
 
+const (
+	lockingExpireWindow = 15 * time.Second
+)
+
 // RegisterPeriodicTask register a periodic task which will be triggered periodically
 func (server *Server) RegisterPeriodicTask(spec, name string, signature *tasks.Signature) error {
-	//check spec
+	// check spec
 	schedule, err := cron.ParseStandard(spec)
 	if err != nil {
 		return err
 	}
 
 	f := func() {
-		//get lock
-		err := server.lock.LockWithRetries(utils.GetLockName(name, spec), schedule.Next(time.Now()).UnixNano()-1)
+		// get lock
+		err := server.lock.LockWithRetries(utils.GetLockName(name, spec), schedule.Next(time.Now()).UnixNano()-lockingExpireWindow.Nanoseconds())
 		if err != nil {
 			return
 		}
 
-		//send task
+		// send task
 		_, err = server.SendTask(tasks.CopySignature(signature))
 		if err != nil {
 			log.ERROR.Printf("periodic task failed. task name is: %s. error is %s", name, err.Error())
@@ -381,7 +385,7 @@ func (server *Server) RegisterPeriodicTask(spec, name string, signature *tasks.S
 
 // RegisterPeriodicChain register a periodic chain which will be triggered periodically
 func (server *Server) RegisterPeriodicChain(spec, name string, signatures ...*tasks.Signature) error {
-	//check spec
+	// check spec
 	schedule, err := cron.ParseStandard(spec)
 	if err != nil {
 		return err
@@ -391,13 +395,13 @@ func (server *Server) RegisterPeriodicChain(spec, name string, signatures ...*ta
 		// new chain
 		chain, _ := tasks.NewChain(tasks.CopySignatures(signatures...)...)
 
-		//get lock
-		err := server.lock.LockWithRetries(utils.GetLockName(name, spec), schedule.Next(time.Now()).UnixNano()-1)
+		// get lock
+		err := server.lock.LockWithRetries(utils.GetLockName(name, spec), schedule.Next(time.Now()).UnixNano()-lockingExpireWindow.Nanoseconds())
 		if err != nil {
 			return
 		}
 
-		//send task
+		// send task
 		_, err = server.SendChain(chain)
 		if err != nil {
 			log.ERROR.Printf("periodic task failed. task name is: %s. error is %s", name, err.Error())
@@ -410,7 +414,7 @@ func (server *Server) RegisterPeriodicChain(spec, name string, signatures ...*ta
 
 // RegisterPeriodicGroup register a periodic group which will be triggered periodically
 func (server *Server) RegisterPeriodicGroup(spec, name string, sendConcurrency int, signatures ...*tasks.Signature) error {
-	//check spec
+	// check spec
 	schedule, err := cron.ParseStandard(spec)
 	if err != nil {
 		return err
@@ -420,13 +424,13 @@ func (server *Server) RegisterPeriodicGroup(spec, name string, sendConcurrency i
 		// new group
 		group, _ := tasks.NewGroup(tasks.CopySignatures(signatures...)...)
 
-		//get lock
-		err := server.lock.LockWithRetries(utils.GetLockName(name, spec), schedule.Next(time.Now()).UnixNano()-1)
+		// get lock
+		err := server.lock.LockWithRetries(utils.GetLockName(name, spec), schedule.Next(time.Now()).UnixNano()-lockingExpireWindow.Nanoseconds())
 		if err != nil {
 			return
 		}
 
-		//send task
+		// send task
 		_, err = server.SendGroup(group, sendConcurrency)
 		if err != nil {
 			log.ERROR.Printf("periodic task failed. task name is: %s. error is %s", name, err.Error())
@@ -439,7 +443,7 @@ func (server *Server) RegisterPeriodicGroup(spec, name string, sendConcurrency i
 
 // RegisterPeriodicChord register a periodic chord which will be triggered periodically
 func (server *Server) RegisterPeriodicChord(spec, name string, sendConcurrency int, callback *tasks.Signature, signatures ...*tasks.Signature) error {
-	//check spec
+	// check spec
 	schedule, err := cron.ParseStandard(spec)
 	if err != nil {
 		return err
@@ -450,13 +454,13 @@ func (server *Server) RegisterPeriodicChord(spec, name string, sendConcurrency i
 		group, _ := tasks.NewGroup(tasks.CopySignatures(signatures...)...)
 		chord, _ := tasks.NewChord(group, tasks.CopySignature(callback))
 
-		//get lock
-		err := server.lock.LockWithRetries(utils.GetLockName(name, spec), schedule.Next(time.Now()).UnixNano()-1)
+		// get lock
+		err := server.lock.LockWithRetries(utils.GetLockName(name, spec), schedule.Next(time.Now()).UnixNano()-lockingExpireWindow.Nanoseconds())
 		if err != nil {
 			return
 		}
 
-		//send task
+		// send task
 		_, err = server.SendChord(chord, sendConcurrency)
 		if err != nil {
 			log.ERROR.Printf("periodic task failed. task name is: %s. error is %s", name, err.Error())
