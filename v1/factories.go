@@ -59,23 +59,24 @@ func BrokerFactory(cnf *config.Config) (brokeriface.Broker, error) {
 		}
 		brokers := strings.Split(parts[1], ",")
 		if len(brokers) > 1 || (cnf.Redis != nil && cnf.Redis.ClusterMode) {
-			return redisbroker.NewGR(cnf, brokers, 0), nil
+			db, brokers := ParseBrokers(brokers)
+			return redisbroker.NewGR(cnf, brokers, db), nil
 		} else {
-			redisHost, redisPassword, redisDB, err := ParseRedisURL(cnf.Broker)
+			redisHost, redisUsername, redisPassword, redisDB, err := ParseRedisURL(cnf.Broker)
 			if err != nil {
 				return nil, err
 			}
-			return redisbroker.New(cnf, redisHost, redisPassword, "", redisDB), nil
+			return redisbroker.New(cnf, redisHost, redisUsername, redisPassword, "", redisDB), nil
 		}
 	}
 
 	if strings.HasPrefix(cnf.Broker, "redis+socket://") {
-		redisSocket, redisPassword, redisDB, err := ParseRedisSocketURL(cnf.Broker)
+		redisSocket, redisUsername, redisPassword, redisDB, err := ParseRedisSocketURL(cnf.Broker)
 		if err != nil {
 			return nil, err
 		}
 
-		return redisbroker.New(cnf, "", redisPassword, redisSocket, redisDB), nil
+		return redisbroker.New(cnf, "", redisUsername, redisPassword, redisSocket, redisDB), nil
 	}
 
 	if strings.HasPrefix(cnf.Broker, "eager") {
@@ -141,25 +142,26 @@ func BackendFactory(cnf *config.Config) (backendiface.Backend, error) {
 		parts := strings.Split(cnf.ResultBackend, scheme)
 		addrs := strings.Split(parts[1], ",")
 		if len(addrs) > 1 || (cnf.Redis != nil && cnf.Redis.ClusterMode) {
-			return redisbackend.NewGR(cnf, addrs, 0), nil
+			db, addrs := ParseBrokers(addrs)
+			return redisbackend.NewGR(cnf, addrs, db), nil
 		} else {
-			redisHost, redisPassword, redisDB, err := ParseRedisURL(cnf.ResultBackend)
+			redisHost, redisUsername, redisPassword, redisDB, err := ParseRedisURL(cnf.ResultBackend)
 
 			if err != nil {
 				return nil, err
 			}
 
-			return redisbackend.New(cnf, redisHost, redisPassword, "", redisDB), nil
+			return redisbackend.New(cnf, redisHost, redisUsername, redisPassword, "", redisDB), nil
 		}
 	}
 
 	if strings.HasPrefix(cnf.ResultBackend, "redis+socket://") {
-		redisSocket, redisPassword, redisDB, err := ParseRedisSocketURL(cnf.ResultBackend)
+		redisSocket, redisUsername, redisPassword, redisDB, err := ParseRedisSocketURL(cnf.ResultBackend)
 		if err != nil {
 			return nil, err
 		}
 
-		return redisbackend.New(cnf, "", redisPassword, redisSocket, redisDB), nil
+		return redisbackend.New(cnf, "", redisUsername, redisPassword, redisSocket, redisDB), nil
 	}
 
 	if strings.HasPrefix(cnf.ResultBackend, "mongodb://") ||
@@ -183,7 +185,7 @@ func BackendFactory(cnf *config.Config) (backendiface.Backend, error) {
 }
 
 // ParseRedisURL ...
-func ParseRedisURL(url string) (host, password string, db int, err error) {
+func ParseRedisURL(url string) (host, username, password string, db int, err error) {
 	// redis://pwd@host/db
 
 	var u *neturl.URL
@@ -198,9 +200,11 @@ func ParseRedisURL(url string) (host, password string, db int, err error) {
 
 	if u.User != nil {
 		var exists bool
+		username = u.User.Username()
 		password, exists = u.User.Password()
 		if !exists {
 			password = u.User.Username()
+			username = ""
 		}
 	}
 
@@ -217,6 +221,23 @@ func ParseRedisURL(url string) (host, password string, db int, err error) {
 	}
 
 	return
+}
+
+// Parse the database index from the last broker in the list, and remove the /db part from it.
+func ParseBrokers(brokers []string) (int, []string) {
+	db := 0
+	last := brokers[len(brokers)-1]
+	if strings.Contains(last, "/") {
+		parts := strings.SplitN(last, "/", 2)
+		brokers[len(brokers)-1] = parts[0]
+		if len(parts) == 2 && parts[1] != "" {
+			if val, err := strconv.Atoi(parts[1]); err == nil {
+				db = val
+			}
+		}
+	}
+
+	return db, brokers
 }
 
 // LockFactory creates a new object of iface.Lock
@@ -245,7 +266,7 @@ func LockFactory(cnf *config.Config) (lockiface.Lock, error) {
 // redis+socket:// scheme. This scheme is not standard (or even de facto) and
 // is used as a transitional mechanism until the the config package gains the
 // proper facilities to support socket-based connections.
-func ParseRedisSocketURL(url string) (path, password string, db int, err error) {
+func ParseRedisSocketURL(url string) (path, username, password string, db int, err error) {
 	parts := strings.Split(url, "redis+socket://")
 	if parts[0] != "" {
 		err = errors.New("No redis scheme found")
@@ -264,7 +285,13 @@ func ParseRedisSocketURL(url string) (path, password string, db int, err error) 
 	// Extract password if any
 	parts = strings.SplitN(remainder, "@", 2)
 	if len(parts) == 2 {
-		password = parts[0]
+		userinfo := strings.SplitN(parts[0], ":", 2)
+		if len(userinfo) == 2 {
+			username = userinfo[0]
+			password = userinfo[1]
+		} else {
+			password = userinfo[0]
+		}
 		remainder = parts[1]
 	} else {
 		remainder = parts[0]

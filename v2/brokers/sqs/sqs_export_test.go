@@ -1,21 +1,21 @@
 package sqs
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"sync"
 
-	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/aws/session"
-	"github.com/aws/aws-sdk-go/service/sqs/sqsiface"
+	sqsiface "github.com/RichardKnop/machinery/v2/brokers/iface/sqs"
 
 	"github.com/RichardKnop/machinery/v2/brokers/iface"
 	"github.com/RichardKnop/machinery/v2/common"
 	"github.com/RichardKnop/machinery/v2/config"
-
-	awssqs "github.com/aws/aws-sdk-go/service/sqs"
+	"github.com/aws/aws-sdk-go-v2/aws"
+	awssqs "github.com/aws/aws-sdk-go-v2/service/sqs"
+	"github.com/aws/aws-sdk-go-v2/service/sqs/types"
 )
 
 var (
@@ -23,10 +23,10 @@ var (
 )
 
 type FakeSQS struct {
-	sqsiface.SQSAPI
+	sqsiface.API
 }
 
-func (f *FakeSQS) SendMessage(*awssqs.SendMessageInput) (*awssqs.SendMessageOutput, error) {
+func (f *FakeSQS) SendMessage(context.Context, *awssqs.SendMessageInput, ...func(*awssqs.Options)) (*awssqs.SendMessageOutput, error) {
 	output := awssqs.SendMessageOutput{
 		MD5OfMessageAttributes: aws.String("d25a6aea97eb8f585bfa92d314504a92"),
 		MD5OfMessageBody:       aws.String("bbdc5fdb8be7251f5c910905db994bab"),
@@ -35,29 +35,29 @@ func (f *FakeSQS) SendMessage(*awssqs.SendMessageInput) (*awssqs.SendMessageOutp
 	return &output, nil
 }
 
-func (f *FakeSQS) ReceiveMessage(*awssqs.ReceiveMessageInput) (*awssqs.ReceiveMessageOutput, error) {
+func (f *FakeSQS) ReceiveMessage(context.Context, *awssqs.ReceiveMessageInput, ...func(*awssqs.Options)) (*awssqs.ReceiveMessageOutput, error) {
 	return ReceiveMessageOutput, nil
 }
 
-func (f *FakeSQS) DeleteMessage(*awssqs.DeleteMessageInput) (*awssqs.DeleteMessageOutput, error) {
+func (f *FakeSQS) DeleteMessage(context.Context, *awssqs.DeleteMessageInput, ...func(*awssqs.Options)) (*awssqs.DeleteMessageOutput, error) {
 	return &awssqs.DeleteMessageOutput{}, nil
 }
 
 type ErrorSQS struct {
-	sqsiface.SQSAPI
+	sqsiface.API
 }
 
-func (e *ErrorSQS) SendMessage(*awssqs.SendMessageInput) (*awssqs.SendMessageOutput, error) {
+func (e *ErrorSQS) SendMessage(context.Context, *awssqs.SendMessageInput, ...func(*awssqs.Options)) (*awssqs.SendMessageOutput, error) {
 	err := errors.New("this is an error")
 	return nil, err
 }
 
-func (e *ErrorSQS) ReceiveMessage(*awssqs.ReceiveMessageInput) (*awssqs.ReceiveMessageOutput, error) {
+func (e *ErrorSQS) ReceiveMessage(context.Context, *awssqs.ReceiveMessageInput, ...func(*awssqs.Options)) (*awssqs.ReceiveMessageOutput, error) {
 	err := errors.New("this is an error")
 	return nil, err
 }
 
-func (e *ErrorSQS) DeleteMessage(*awssqs.DeleteMessageInput) (*awssqs.DeleteMessageOutput, error) {
+func (e *ErrorSQS) DeleteMessage(context.Context, *awssqs.DeleteMessageInput, ...func(*awssqs.Options)) (*awssqs.DeleteMessageOutput, error) {
 	err := errors.New("this is an error")
 	return nil, err
 }
@@ -66,15 +66,15 @@ func init() {
 	// TODO: chang message body to signature example
 	messageBody, _ := json.Marshal(map[string]int{"apple": 5, "lettuce": 7})
 	ReceiveMessageOutput = &awssqs.ReceiveMessageOutput{
-		Messages: []*awssqs.Message{
+		Messages: []types.Message{
 			{
-				Attributes: map[string]*string{
-					"SentTimestamp": aws.String("1512962021537"),
+				Attributes: map[string]string{
+					"SentTimestamp": "1512962021537",
 				},
 				Body:                   aws.String(string(messageBody)),
 				MD5OfBody:              aws.String("bbdc5fdb8be7251f5c910905db994bab"),
 				MD5OfMessageAttributes: aws.String("d25a6aea97eb8f585bfa92d314504a92"),
-				MessageAttributes: map[string]*awssqs.MessageAttributeValue{
+				MessageAttributes: map[string]types.MessageAttributeValue{
 					"Title": {
 						DataType:    aws.String("String"),
 						StringValue: aws.String("The Whistler"),
@@ -107,20 +107,21 @@ func NewTestConfig() *config.Config {
 		DefaultQueue:  "test_queue",
 		ResultBackend: fmt.Sprintf("redis://%v", redisURL),
 		Lock:          fmt.Sprintf("redis://%v", redisURL),
+		SQS: &config.SQSConfig{
+			VisibilityTimeout: aws.Int(30),
+		},
 	}
 }
 
-func NewTestBroker() *Broker {
+func NewTestBroker(cnf *config.Config) *Broker {
 
-	cnf := NewTestConfig()
-	sess := session.Must(session.NewSessionWithOptions(session.Options{
-		SharedConfigState: session.SharedConfigEnable,
-	}))
+	var svc sqsiface.API = new(FakeSQS)
 
-	svc := new(FakeSQS)
+	if cnf.SQS.Client != nil {
+		svc = cnf.SQS.Client
+	}
 	return &Broker{
 		Broker:            common.NewBroker(cnf),
-		sess:              sess,
 		service:           svc,
 		processingWG:      sync.WaitGroup{},
 		receivingWG:       sync.WaitGroup{},
@@ -131,14 +132,10 @@ func NewTestBroker() *Broker {
 func NewTestErrorBroker() *Broker {
 
 	cnf := NewTestConfig()
-	sess := session.Must(session.NewSessionWithOptions(session.Options{
-		SharedConfigState: session.SharedConfigEnable,
-	}))
 
 	errSvc := new(ErrorSQS)
 	return &Broker{
 		Broker:            common.NewBroker(cnf),
-		sess:              sess,
 		service:           errSvc,
 		processingWG:      sync.WaitGroup{},
 		receivingWG:       sync.WaitGroup{},
