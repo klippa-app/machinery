@@ -127,7 +127,7 @@ func (b *Broker) StartConsuming(consumerTag string, concurrency int, taskProcess
 
 				if taskProcessor.PreConsumeHandler() {
 					task, _ := b.nextTask(getQueue(b.GetConfig(), taskProcessor))
-					//TODO: should this error be ignored?
+					// TODO: should this error be ignored?
 					if len(task) > 0 {
 						deliveries <- task
 					}
@@ -320,17 +320,20 @@ func (b *Broker) GetDelayedTask(taskUUID string) (*tasks.Signature, error) {
 }
 
 func (b *Broker) CancelDelayedTask(taskUUID string) error {
-	conn := b.open()
-	defer conn.Close()
-
 	task, err := b.GetDelayedTask(taskUUID)
 	if err != nil {
 		return err
 	}
 
 	taskBytes, err := task.ToJSONByte()
-	_, err = conn.Do("ZREM", b.redisDelayedTasksKey, taskBytes)
+	if err != nil {
+		return err
+	}
 
+	conn := b.open()
+	defer conn.Close()
+
+	_, err = conn.Do("ZREM", b.redisDelayedTasksKey, taskBytes)
 	return err
 }
 
