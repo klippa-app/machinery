@@ -159,6 +159,43 @@ Redis related configuration. Not necessary if you are using other backend.
 
 See: [config](/v1/config/config.go) (TODO)
 
+#### Queue Partitioning
+
+Inspired by [River Pro's concurrency limits](https://riverqueue.com/docs/pro/concurrency-limits), the Redis broker can partition a queue by an arbitrary key (e.g. a customer or tenant ID) so that one partition's backlog cannot starve the others. This is opt-in and fully backward compatible: tasks whose `Signature.PartitionKey` is empty, and any queue with no `Partitioning` config at all, behave exactly as before.
+
+Enable it per-queue via `config.RedisConfig.Partitioning`:
+
+```go
+cnf := &config.Config{
+  Broker:       "redis://localhost:6379",
+  DefaultQueue: "machinery_tasks",
+  Redis: &config.RedisConfig{
+    Partitioning: &config.PartitioningConfig{
+      GlobalConcurrency: 5,              // across all worker processes, 0 = unlimited
+      LocalConcurrency:  2,               // per worker process, 0 = unlimited
+      LeaseTimeout:      30 * time.Minute, // defaults to 1 hour
+    },
+  },
+}
+```
+
+Then set `PartitionKey` on any signature that should be subject to these limits:
+
+```go
+sig := &tasks.Signature{
+  Name:         "generate_report",
+  PartitionKey: customerID,
+  Args:         []tasks.Arg{{Type: "string", Value: customerID}},
+}
+```
+
+A few things worth knowing:
+
+* `GlobalConcurrency` and `LocalConcurrency` can be set independently or together; whichever is non-zero is enforced, and both apply at once when both are set. `GlobalConcurrency` is enforced via a self-expiring lease in Redis, so a worker that crashes or panics mid-task doesn't leak that partition's concurrency slot forever — `LeaseTimeout` bounds how long a slot can be held before it's automatically reclaimed. Set it comfortably above your longest expected task duration.
+* `LocalConcurrency` is enforced purely in-memory per worker process, with no Redis round trip.
+* Tasks published without a `PartitionKey` always go to the plain queue and are never subject to these limits, even when partitioning is configured for that queue.
+* A brand-new partition key's very first task may take up to one `NormalTasksPollPeriod` to be picked up by an already-idle worker (Redis can only wake a blocked `BLPOP` for keys it was already watching). Every subsequent task for that same key, and all unpartitioned tasks, are dispatched immediately as usual.
+
 ### Custom Logger
 
 You can define a custom logger by implementing the following interface:
@@ -346,6 +383,7 @@ type Signature struct {
   OnSuccess      []*Signature
   OnError        []*Signature
   ChordCallback  *Signature
+  PartitionKey   string
 }
 ```
 
@@ -374,6 +412,8 @@ type Signature struct {
 `OnError` defines tasks which will be called after the task execution fails. The first argument passed to error callbacks will be the error string returned from the failed task.
 
 `ChordCallback` is used to create a callback to a group of tasks.
+
+`PartitionKey` groups this task into an independent concurrency partition within its queue (e.g. a customer or tenant ID), so a backlog of tasks for one partition key cannot starve tasks for other partition keys. It is only enforced when the broker's queue has [queue partitioning](#queue-partitioning) configured; otherwise it is ignored and the task is processed on the plain queue as usual.
 
 #### Supported Types
 
@@ -468,10 +508,10 @@ return tasks.NewErrRetryTaskLater("some error", 4 * time.Hour)
 Tasks currently waiting in the queue to be consumed by workers can be inspected, e.g.:
 
 ```go
-server.GetBroker().GetPendingTasks("some_queue")
+server.GetBroker().GetPendingTasks(context.Background(), "some_queue")
 ```
 
-> Currently only supported by Redis broker.
+> Currently only supported by Redis broker. When [queue partitioning](#queue-partitioning) is configured, this aggregates the plain queue with every partition's own list.
 
 #### Keeping Results
 

@@ -70,6 +70,13 @@ type Signature struct {
 	// IgnoreWhenTaskNotRegistered auto removes the request when there is no handeler available
 	// When this is true a task with no handler will be ignored and not placed back in the queue
 	IgnoreWhenTaskNotRegistered bool
+	// PartitionKey, when set, groups this task into an independent
+	// concurrency partition within its queue (e.g. a customer or tenant
+	// ID), so that a backlog of tasks for one partition key cannot starve
+	// tasks for other partition keys. Only enforced when the broker's queue
+	// has partitioning configured (see config.PartitioningConfig); ignored
+	// otherwise.
+	PartitionKey string
 }
 
 // NewSignature creates a new task signature
