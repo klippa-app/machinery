@@ -85,20 +85,20 @@ func TestPublishAndGetPendingTasks(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, queue, sig.RoutingKey)
 
-	pending, err := broker.GetPendingTasks(queue)
+	pending, err := broker.GetPendingTasks(context.Background(), queue)
 	assert.NoError(t, err)
 	require.Len(t, pending, 1)
 	assert.Equal(t, "task1", pending[0].UUID)
 
-	count, err := broker.GetPendingTaskCount(queue)
+	count, err := broker.GetPendingTaskCount(context.Background(), queue)
 	assert.NoError(t, err)
 	assert.EqualValues(t, 1, count)
 
-	pending, err = broker.GetPendingTasks("")
+	pending, err = broker.GetPendingTasks(context.Background(), "")
 	assert.NoError(t, err)
 	assert.Len(t, pending, 1)
 
-	count, err = broker.GetPendingTaskCount("")
+	count, err = broker.GetPendingTaskCount(context.Background(), "")
 	assert.NoError(t, err)
 	assert.EqualValues(t, 1, count)
 }
@@ -137,27 +137,27 @@ func TestPublishDelayedAndCancel(t *testing.T) {
 	err := broker.Publish(context.Background(), sig)
 	assert.NoError(t, err)
 
-	delayed, err := broker.GetDelayedTasks()
+	delayed, err := broker.GetDelayedTasks(context.Background())
 	assert.NoError(t, err)
 	require.Len(t, delayed, 1)
 	assert.Equal(t, "delayed1", delayed[0].UUID)
 
-	found, err := broker.GetDelayedTask("delayed1")
+	found, err := broker.GetDelayedTask(context.Background(), "delayed1")
 	assert.NoError(t, err)
 	require.NotNil(t, found)
 	assert.Equal(t, "delayed1", found.UUID)
 
-	_, err = broker.GetDelayedTask("does-not-exist")
+	_, err = broker.GetDelayedTask(context.Background(), "does-not-exist")
 	assert.EqualError(t, err, "Not found")
 
-	err = broker.CancelDelayedTask("delayed1")
+	err = broker.CancelDelayedTask(context.Background(), "delayed1")
 	assert.NoError(t, err)
 
-	delayed, err = broker.GetDelayedTasks()
+	delayed, err = broker.GetDelayedTasks(context.Background())
 	assert.NoError(t, err)
 	assert.Len(t, delayed, 0)
 
-	err = broker.CancelDelayedTask("delayed1")
+	err = broker.CancelDelayedTask(context.Background(), "delayed1")
 	assert.EqualError(t, err, "Not found")
 }
 
@@ -173,16 +173,16 @@ func TestGetPendingTasksRedisErrors(t *testing.T) {
 
 	require.NoError(t, client.Set(ctxBg(), queue, "not-a-list", 0).Err())
 
-	_, err := broker.GetPendingTasks(queue)
+	_, err := broker.GetPendingTasks(context.Background(), queue)
 	assert.Error(t, err)
 
-	_, err = broker.GetPendingTaskCount(queue)
+	_, err = broker.GetPendingTaskCount(context.Background(), queue)
 	assert.Error(t, err)
 
 	require.NoError(t, client.Del(ctxBg(), queue).Err())
 	require.NoError(t, client.RPush(ctxBg(), queue, "not-json").Err())
 
-	_, err = broker.GetPendingTasks(queue)
+	_, err = broker.GetPendingTasks(context.Background(), queue)
 	assert.Error(t, err)
 }
 
@@ -199,13 +199,13 @@ func TestGetDelayedTasksRedisErrors(t *testing.T) {
 
 	require.NoError(t, client.Set(ctxBg(), delayedKey, "not-a-zset", 0).Err())
 
-	_, err := broker.GetDelayedTasks()
+	_, err := broker.GetDelayedTasks(context.Background())
 	assert.Error(t, err)
 
 	require.NoError(t, client.Del(ctxBg(), delayedKey).Err())
 	require.NoError(t, client.ZAdd(ctxBg(), delayedKey, goredis.Z{Score: 1, Member: "not-json"}).Err())
 
-	_, err = broker.GetDelayedTasks()
+	_, err = broker.GetDelayedTasks(context.Background())
 	assert.Error(t, err)
 }
 
@@ -358,7 +358,7 @@ func TestStartConsumingNotRegisteredIgnored(t *testing.T) {
 
 	time.Sleep(300 * time.Millisecond)
 
-	count, err := broker.GetPendingTaskCount(queue)
+	count, err := broker.GetPendingTaskCount(context.Background(), queue)
 	assert.NoError(t, err)
 	assert.EqualValues(t, 0, count)
 
@@ -419,7 +419,7 @@ func TestStartConsumingPreConsumeHandlerFalse(t *testing.T) {
 
 	time.Sleep(200 * time.Millisecond)
 
-	count, err := broker.GetPendingTaskCount(queue)
+	count, err := broker.GetPendingTaskCount(context.Background(), queue)
 	assert.NoError(t, err)
 	assert.EqualValues(t, 1, count)
 

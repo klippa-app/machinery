@@ -1,27 +1,29 @@
 package iface
 
 import (
+	"context"
+
 	"github.com/RichardKnop/machinery/v1/tasks"
 )
 
 // Backend - a common interface for all result backends
 type Backend interface {
 	// Group related functions
-	InitGroup(groupUUID string, taskUUIDs []string) error
-	GroupCompleted(groupUUID string, groupTaskCount int) (bool, error)
-	GroupTaskStates(groupUUID string, groupTaskCount int) ([]*tasks.TaskState, error)
-	TriggerChord(groupUUID string) (bool, error)
+	InitGroup(ctx context.Context, groupUUID string, taskUUIDs []string) error
+	GroupCompleted(ctx context.Context, groupUUID string, groupTaskCount int) (bool, error)
+	GroupTaskStates(ctx context.Context, groupUUID string, groupTaskCount int) ([]*tasks.TaskState, error)
+	TriggerChord(ctx context.Context, groupUUID string) (bool, error)
 
 	// Setting / getting task state
-	SetStatePending(signature *tasks.Signature) error
-	SetStateReceived(signature *tasks.Signature) error
-	SetStateStarted(signature *tasks.Signature) error
-	SetStateRetry(signature *tasks.Signature) error
-	SetStateSuccess(signature *tasks.Signature, results []*tasks.TaskResult) error
-	SetStateFailure(signature *tasks.Signature, err string) error
-	GetState(taskUUID string) (*tasks.TaskState, error)
+	SetStatePending(ctx context.Context, signature *tasks.Signature) error
+	SetStateReceived(ctx context.Context, signature *tasks.Signature) error
+	SetStateStarted(ctx context.Context, signature *tasks.Signature) error
+	SetStateRetry(ctx context.Context, signature *tasks.Signature) error
+	SetStateSuccess(ctx context.Context, signature *tasks.Signature, results []*tasks.TaskResult) error
+	SetStateFailure(ctx context.Context, signature *tasks.Signature, err string) error
+	GetState(ctx context.Context, taskUUID string) (*tasks.TaskState, error)
 
 	// Purging stored stored tasks states and group meta data
-	PurgeState(taskUUID string) error
-	PurgeGroupMeta(groupUUID string) error
+	PurgeState(ctx context.Context, taskUUID string) error
+	PurgeGroupMeta(ctx context.Context, groupUUID string) error
 }

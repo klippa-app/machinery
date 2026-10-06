@@ -49,41 +49,41 @@ func TestGroupCompleted(t *testing.T) {
 	}
 
 	// Cleanup before the test
-	backend.PurgeState(task1.UUID)
-	backend.PurgeState(task2.UUID)
-	backend.PurgeGroupMeta(groupUUID)
+	backend.PurgeState(context.Background(), task1.UUID)
+	backend.PurgeState(context.Background(), task2.UUID)
+	backend.PurgeGroupMeta(context.Background(), groupUUID)
 
-	groupCompleted, err := backend.GroupCompleted(groupUUID, 2)
+	groupCompleted, err := backend.GroupCompleted(context.Background(), groupUUID, 2)
 	if assert.Error(t, err) {
 		assert.False(t, groupCompleted)
 		assert.Equal(t, "redis: nil", err.Error())
 	}
 
-	backend.InitGroup(groupUUID, []string{task1.UUID, task2.UUID})
+	backend.InitGroup(context.Background(), groupUUID, []string{task1.UUID, task2.UUID})
 
-	groupCompleted, err = backend.GroupCompleted(groupUUID, 2)
+	groupCompleted, err = backend.GroupCompleted(context.Background(), groupUUID, 2)
 	if assert.Error(t, err) {
 		assert.False(t, groupCompleted)
 		assert.Equal(t, "redis: nil", err.Error())
 	}
 
-	backend.SetStatePending(task1)
-	backend.SetStateStarted(task2)
-	groupCompleted, err = backend.GroupCompleted(groupUUID, 2)
+	backend.SetStatePending(context.Background(), task1)
+	backend.SetStateStarted(context.Background(), task2)
+	groupCompleted, err = backend.GroupCompleted(context.Background(), groupUUID, 2)
 	if assert.NoError(t, err) {
 		assert.False(t, groupCompleted)
 	}
 
 	taskResults := []*tasks.TaskResult{new(tasks.TaskResult)}
-	backend.SetStateStarted(task1)
-	backend.SetStateSuccess(task2, taskResults)
-	groupCompleted, err = backend.GroupCompleted(groupUUID, 2)
+	backend.SetStateStarted(context.Background(), task1)
+	backend.SetStateSuccess(context.Background(), task2, taskResults)
+	groupCompleted, err = backend.GroupCompleted(context.Background(), groupUUID, 2)
 	if assert.NoError(t, err) {
 		assert.False(t, groupCompleted)
 	}
 
-	backend.SetStateFailure(task1, "Some error")
-	groupCompleted, err = backend.GroupCompleted(groupUUID, 2)
+	backend.SetStateFailure(context.Background(), task1, "Some error")
+	groupCompleted, err = backend.GroupCompleted(context.Background(), groupUUID, 2)
 	if assert.NoError(t, err) {
 		assert.True(t, groupCompleted)
 	}
@@ -100,34 +100,34 @@ func TestGetState(t *testing.T) {
 		GroupUUID: "testGroupUUID",
 	}
 
-	backend.PurgeState("testTaskUUID")
+	backend.PurgeState(context.Background(), "testTaskUUID")
 
 	var (
 		taskState *tasks.TaskState
 		err       error
 	)
 
-	taskState, err = backend.GetState(signature.UUID)
+	taskState, err = backend.GetState(context.Background(), signature.UUID)
 	assert.Equal(t, "redis: nil", err.Error())
 	assert.Nil(t, taskState)
 
 	//Pending State
-	backend.SetStatePending(signature)
-	taskState, err = backend.GetState(signature.UUID)
+	backend.SetStatePending(context.Background(), signature)
+	taskState, err = backend.GetState(context.Background(), signature.UUID)
 	assert.NoError(t, err)
 	assert.Equal(t, signature.Name, taskState.TaskName)
 	createdAt := taskState.CreatedAt
 
 	//Received State
-	backend.SetStateReceived(signature)
-	taskState, err = backend.GetState(signature.UUID)
+	backend.SetStateReceived(context.Background(), signature)
+	taskState, err = backend.GetState(context.Background(), signature.UUID)
 	assert.NoError(t, err)
 	assert.Equal(t, signature.Name, taskState.TaskName)
 	assert.Equal(t, createdAt, taskState.CreatedAt)
 
 	//Started State
-	backend.SetStateStarted(signature)
-	taskState, err = backend.GetState(signature.UUID)
+	backend.SetStateStarted(context.Background(), signature)
+	taskState, err = backend.GetState(context.Background(), signature.UUID)
 	assert.NoError(t, err)
 	assert.Equal(t, signature.Name, taskState.TaskName)
 	assert.Equal(t, createdAt, taskState.CreatedAt)
@@ -139,8 +139,8 @@ func TestGetState(t *testing.T) {
 			Value: 2,
 		},
 	}
-	backend.SetStateSuccess(signature, taskResults)
-	taskState, err = backend.GetState(signature.UUID)
+	backend.SetStateSuccess(context.Background(), signature, taskResults)
+	taskState, err = backend.GetState(context.Background(), signature.UUID)
 	assert.NoError(t, err)
 	assert.Equal(t, signature.Name, taskState.TaskName)
 	assert.Equal(t, createdAt, taskState.CreatedAt)
@@ -158,13 +158,13 @@ func TestPurgeState(t *testing.T) {
 		GroupUUID: "testGroupUUID",
 	}
 
-	backend.SetStatePending(signature)
-	taskState, err := backend.GetState(signature.UUID)
+	backend.SetStatePending(context.Background(), signature)
+	taskState, err := backend.GetState(context.Background(), signature.UUID)
 	assert.NotNil(t, taskState)
 	assert.NoError(t, err)
 
-	backend.PurgeState(taskState.TaskUUID)
-	taskState, err = backend.GetState(signature.UUID)
+	backend.PurgeState(context.Background(), taskState.TaskUUID)
+	taskState, err = backend.GetState(context.Background(), signature.UUID)
 	assert.Nil(t, taskState)
 	assert.Error(t, err)
 }
@@ -179,18 +179,18 @@ func TestGroupTaskStates(t *testing.T) {
 	task1 := &tasks.Signature{UUID: "testTaskUUIDStates1", GroupUUID: groupUUID}
 	task2 := &tasks.Signature{UUID: "testTaskUUIDStates2", GroupUUID: groupUUID}
 
-	backend.PurgeState(task1.UUID)
-	backend.PurgeState(task2.UUID)
-	backend.PurgeGroupMeta(groupUUID)
+	backend.PurgeState(context.Background(), task1.UUID)
+	backend.PurgeState(context.Background(), task2.UUID)
+	backend.PurgeGroupMeta(context.Background(), groupUUID)
 
-	_, err := backend.GroupTaskStates(groupUUID, 2)
+	_, err := backend.GroupTaskStates(context.Background(), groupUUID, 2)
 	assert.Error(t, err)
 
-	backend.InitGroup(groupUUID, []string{task1.UUID, task2.UUID})
-	backend.SetStatePending(task1)
-	backend.SetStateSuccess(task2, []*tasks.TaskResult{new(tasks.TaskResult)})
+	backend.InitGroup(context.Background(), groupUUID, []string{task1.UUID, task2.UUID})
+	backend.SetStatePending(context.Background(), task1)
+	backend.SetStateSuccess(context.Background(), task2, []*tasks.TaskResult{new(tasks.TaskResult)})
 
-	states, err := backend.GroupTaskStates(groupUUID, 2)
+	states, err := backend.GroupTaskStates(context.Background(), groupUUID, 2)
 	assert.NoError(t, err)
 	assert.Len(t, states, 2)
 }
@@ -202,18 +202,18 @@ func TestTriggerChord(t *testing.T) {
 	}
 
 	groupUUID := "testGroupUUIDChord"
-	backend.PurgeGroupMeta(groupUUID)
+	backend.PurgeGroupMeta(context.Background(), groupUUID)
 
-	_, err := backend.TriggerChord(groupUUID)
+	_, err := backend.TriggerChord(context.Background(), groupUUID)
 	assert.Error(t, err)
 
-	backend.InitGroup(groupUUID, []string{"t1"})
+	backend.InitGroup(context.Background(), groupUUID, []string{"t1"})
 
-	triggered, err := backend.TriggerChord(groupUUID)
+	triggered, err := backend.TriggerChord(context.Background(), groupUUID)
 	assert.NoError(t, err)
 	assert.True(t, triggered)
 
-	triggered, err = backend.TriggerChord(groupUUID)
+	triggered, err = backend.TriggerChord(context.Background(), groupUUID)
 	assert.NoError(t, err)
 	assert.False(t, triggered)
 }
@@ -230,8 +230,8 @@ func TestTriggerChordLockContention(t *testing.T) {
 
 	groupUUID := "testGroupUUIDChordLock"
 	backend := getRedis()
-	defer backend.PurgeGroupMeta(groupUUID)
-	backend.InitGroup(groupUUID, []string{"t1"})
+	defer backend.PurgeGroupMeta(context.Background(), groupUUID)
+	backend.InitGroup(context.Background(), groupUUID, []string{"t1"})
 
 	client := goredis.NewUniversalClient(&goredis.UniversalOptions{Addrs: strings.Split(redisURL, ",")})
 	defer client.Close()
@@ -240,7 +240,7 @@ func TestTriggerChordLockContention(t *testing.T) {
 	require.NoError(t, m.Lock())
 	defer m.Unlock()
 
-	_, err := backend.TriggerChord(groupUUID)
+	_, err := backend.TriggerChord(context.Background(), groupUUID)
 	assert.Error(t, err)
 }
 
@@ -251,12 +251,12 @@ func TestSetStateRetry(t *testing.T) {
 	}
 
 	signature := &tasks.Signature{UUID: "testTaskUUIDRetry", GroupUUID: "testGroupUUIDRetry"}
-	backend.PurgeState(signature.UUID)
+	backend.PurgeState(context.Background(), signature.UUID)
 
-	err := backend.SetStateRetry(signature)
+	err := backend.SetStateRetry(context.Background(), signature)
 	assert.NoError(t, err)
 
-	taskState, err := backend.GetState(signature.UUID)
+	taskState, err := backend.GetState(context.Background(), signature.UUID)
 	assert.NoError(t, err)
 	assert.Equal(t, signature.Name, taskState.TaskName)
 }
@@ -268,9 +268,9 @@ func TestUpdateStateMarshalError(t *testing.T) {
 	}
 
 	signature := &tasks.Signature{UUID: "testTaskUUIDMarshalErr"}
-	defer backend.PurgeState(signature.UUID)
+	defer backend.PurgeState(context.Background(), signature.UUID)
 
-	err := backend.SetStateSuccess(signature, []*tasks.TaskResult{
+	err := backend.SetStateSuccess(context.Background(), signature, []*tasks.TaskResult{
 		{Type: "chan", Value: make(chan int)},
 	})
 	assert.Error(t, err)
@@ -297,7 +297,7 @@ func TestGetStateDecodeError(t *testing.T) {
 	assert.NoError(t, client.Set(context.Background(), taskUUID, "not-json", 0).Err())
 
 	backend := getRedis()
-	_, err := backend.GetState(taskUUID)
+	_, err := backend.GetState(context.Background(), taskUUID)
 	assert.Error(t, err)
 }
 
@@ -310,16 +310,16 @@ func TestGetStatesDecodeError(t *testing.T) {
 	groupUUID := "testGroupUUIDBadState"
 	taskUUID := "testTaskUUIDBadState"
 	backend := getRedis()
-	backend.PurgeGroupMeta(groupUUID)
-	backend.PurgeState(taskUUID)
-	backend.InitGroup(groupUUID, []string{taskUUID})
+	backend.PurgeGroupMeta(context.Background(), groupUUID)
+	backend.PurgeState(context.Background(), taskUUID)
+	backend.InitGroup(context.Background(), groupUUID, []string{taskUUID})
 
 	client := goredis.NewUniversalClient(&goredis.UniversalOptions{Addrs: strings.Split(redisURL, ",")})
 	defer client.Close()
 	defer client.Del(context.Background(), taskUUID)
 	assert.NoError(t, client.Set(context.Background(), taskUUID, "not-json", 0).Err())
 
-	_, err := backend.GroupCompleted(groupUUID, 1)
+	_, err := backend.GroupCompleted(context.Background(), groupUUID, 1)
 	assert.Error(t, err)
 }
 
@@ -332,16 +332,16 @@ func TestGetStatesMissingKeyError(t *testing.T) {
 	groupUUID := "testGroupUUIDMissingState"
 	taskUUID := "testTaskUUIDNeverSet"
 	backend := getRedis()
-	backend.PurgeGroupMeta(groupUUID)
-	backend.PurgeState(taskUUID)
-	defer backend.PurgeGroupMeta(groupUUID)
+	backend.PurgeGroupMeta(context.Background(), groupUUID)
+	backend.PurgeState(context.Background(), taskUUID)
+	defer backend.PurgeGroupMeta(context.Background(), groupUUID)
 
 	// taskUUID has a group entry but no state was ever set for it, so the
 	// pipelined GET comes back with redis.Nil, exercising getStates' per-key
 	// error branch (distinct from a decode error).
-	backend.InitGroup(groupUUID, []string{taskUUID})
+	backend.InitGroup(context.Background(), groupUUID, []string{taskUUID})
 
-	_, err := backend.GroupTaskStates(groupUUID, 1)
+	_, err := backend.GroupTaskStates(context.Background(), groupUUID, 1)
 	assert.Error(t, err)
 }
 
@@ -358,7 +358,7 @@ func TestGetGroupMetaDecodeError(t *testing.T) {
 	assert.NoError(t, client.Set(context.Background(), groupUUID, "not-json", 0).Err())
 
 	backend := getRedis()
-	_, err := backend.GroupCompleted(groupUUID, 1)
+	_, err := backend.GroupCompleted(context.Background(), groupUUID, 1)
 	assert.Error(t, err)
 }
 

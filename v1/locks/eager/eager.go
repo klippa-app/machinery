@@ -1,6 +1,7 @@
 package eager
 
 import (
+	"context"
 	"errors"
 	"sync"
 	"time"
@@ -32,9 +33,9 @@ func New() *Lock {
 	}
 }
 
-func (e *Lock) LockWithRetries(key string, value int64) error {
+func (e *Lock) LockWithRetries(ctx context.Context, key string, value int64) error {
 	for i := 0; i <= e.retries; i++ {
-		err := e.Lock(key, value)
+		err := e.Lock(ctx, key, value)
 		if err == nil {
 			//成功拿到锁，返回
 			return nil
@@ -45,7 +46,7 @@ func (e *Lock) LockWithRetries(key string, value int64) error {
 	return ErrEagerLockFailed
 }
 
-func (e *Lock) Lock(key string, value int64) error {
+func (e *Lock) Lock(ctx context.Context, key string, value int64) error {
 	e.register.Lock()
 	defer e.register.Unlock()
 	timeout, exist := e.register.m[key]

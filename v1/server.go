@@ -205,7 +205,7 @@ func (server *Server) SendTaskWithContext(ctx context.Context, signature *tasks.
 	}
 
 	// Set initial task state to PENDING
-	if err := server.backend.SetStatePending(signature); err != nil {
+	if err := server.backend.SetStatePending(ctx, signature); err != nil {
 		return nil, fmt.Errorf("Set state pending error: %s", err)
 	}
 
@@ -264,11 +264,11 @@ func (server *Server) SendGroupWithContext(ctx context.Context, group *tasks.Gro
 	errorsChan := make(chan error, len(group.Tasks)*2)
 
 	// Init group
-	server.backend.InitGroup(group.GroupUUID, group.GetUUIDs())
+	server.backend.InitGroup(ctx, group.GroupUUID, group.GetUUIDs())
 
 	// Init the tasks Pending state first
 	for _, signature := range group.Tasks {
-		if err := server.backend.SetStatePending(signature); err != nil {
+		if err := server.backend.SetStatePending(ctx, signature); err != nil {
 			errorsChan <- err
 			continue
 		}
@@ -375,7 +375,7 @@ func (server *Server) RegisterPeriodicTask(spec, name string, signature *tasks.S
 
 	f := func() {
 		// get lock
-		err := server.lock.LockWithRetries(utils.GetLockName(name, spec), schedule.Next(time.Now()).UnixNano()-lockingExpireWindow.Nanoseconds())
+		err := server.lock.LockWithRetries(context.Background(), utils.GetLockName(name, spec), schedule.Next(time.Now()).UnixNano()-lockingExpireWindow.Nanoseconds())
 		if err != nil {
 			return
 		}
@@ -404,7 +404,7 @@ func (server *Server) RegisterPeriodicChain(spec, name string, signatures ...*ta
 		chain, _ := tasks.NewChain(tasks.CopySignatures(signatures...)...)
 
 		// get lock
-		err := server.lock.LockWithRetries(utils.GetLockName(name, spec), schedule.Next(time.Now()).UnixNano()-lockingExpireWindow.Nanoseconds())
+		err := server.lock.LockWithRetries(context.Background(), utils.GetLockName(name, spec), schedule.Next(time.Now()).UnixNano()-lockingExpireWindow.Nanoseconds())
 		if err != nil {
 			return
 		}
@@ -433,7 +433,7 @@ func (server *Server) RegisterPeriodicGroup(spec, name string, sendConcurrency i
 		group, _ := tasks.NewGroup(tasks.CopySignatures(signatures...)...)
 
 		// get lock
-		err := server.lock.LockWithRetries(utils.GetLockName(name, spec), schedule.Next(time.Now()).UnixNano()-lockingExpireWindow.Nanoseconds())
+		err := server.lock.LockWithRetries(context.Background(), utils.GetLockName(name, spec), schedule.Next(time.Now()).UnixNano()-lockingExpireWindow.Nanoseconds())
 		if err != nil {
 			return
 		}
@@ -463,7 +463,7 @@ func (server *Server) RegisterPeriodicChord(spec, name string, sendConcurrency i
 		chord, _ := tasks.NewChord(group, tasks.CopySignature(callback))
 
 		// get lock
-		err := server.lock.LockWithRetries(utils.GetLockName(name, spec), schedule.Next(time.Now()).UnixNano()-lockingExpireWindow.Nanoseconds())
+		err := server.lock.LockWithRetries(context.Background(), utils.GetLockName(name, spec), schedule.Next(time.Now()).UnixNano()-lockingExpireWindow.Nanoseconds())
 		if err != nil {
 			return
 		}

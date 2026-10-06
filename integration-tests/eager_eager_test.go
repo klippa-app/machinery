@@ -1,6 +1,7 @@
 package integration_test
 
 import (
+	"context"
 	"reflect"
 	"testing"
 	"time"
@@ -82,10 +83,10 @@ func (s *EagerIntegrationTestSuite) TestSuccessResult() {
 		s.NotNil(asyncResult)
 		s.Nil(err)
 
-		s.True(asyncResult.GetState().IsCompleted())
-		s.True(asyncResult.GetState().IsSuccess())
+		s.True(asyncResult.GetState(context.Background()).IsCompleted())
+		s.True(asyncResult.GetState(context.Background()).IsSuccess())
 
-		results, err := asyncResult.Get(time.Duration(time.Millisecond * 5))
+		results, err := asyncResult.Get(context.Background(), time.Duration(time.Millisecond*5))
 		if s.NoError(err) {
 			if len(results) != 1 {
 				s.T().Errorf("Number of results returned = %d. Wanted %d", len(results), 1)
@@ -113,10 +114,10 @@ func (s *EagerIntegrationTestSuite) TestSuccessResult() {
 		s.NotNil(asyncResult)
 		s.Nil(err)
 
-		s.True(asyncResult.GetState().IsCompleted())
-		s.True(asyncResult.GetState().IsSuccess())
+		s.True(asyncResult.GetState(context.Background()).IsCompleted())
+		s.True(asyncResult.GetState(context.Background()).IsSuccess())
 
-		results, err := asyncResult.Get(time.Duration(time.Millisecond * 5))
+		results, err := asyncResult.Get(context.Background(), time.Duration(time.Millisecond*5))
 		if s.NoError(err) {
 			if len(results) != 1 {
 				s.T().Errorf("Number of results returned = %d. Wanted %d", len(results), 1)

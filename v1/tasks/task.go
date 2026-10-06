@@ -46,9 +46,8 @@ func SignatureFromContext(ctx context.Context) *Signature {
 }
 
 // NewWithSignature is the same as New but injects the signature
-func NewWithSignature(taskFunc interface{}, signature *Signature) (*Task, error) {
+func NewWithSignature(ctx context.Context, taskFunc interface{}, signature *Signature) (*Task, error) {
 	args := signature.Args
-	ctx := context.Background()
 	ctx = context.WithValue(ctx, signatureCtx, signature)
 	task := &Task{
 		TaskFunc: reflect.ValueOf(taskFunc),
@@ -72,10 +71,10 @@ func NewWithSignature(taskFunc interface{}, signature *Signature) (*Task, error)
 
 // New tries to use reflection to convert the function and arguments
 // into a reflect.Value and prepare it for invocation
-func New(taskFunc interface{}, args []Arg) (*Task, error) {
+func New(ctx context.Context, taskFunc interface{}, args []Arg) (*Task, error) {
 	task := &Task{
 		TaskFunc: reflect.ValueOf(taskFunc),
-		Context:  context.Background(),
+		Context:  ctx,
 	}
 
 	taskFuncType := reflect.TypeOf(taskFunc)
@@ -96,9 +95,9 @@ func New(taskFunc interface{}, args []Arg) (*Task, error) {
 // Call attempts to call the task with the supplied arguments.
 //
 // `err` is set in the return value in two cases:
-// 1. The reflected function invocation panics (e.g. due to a mismatched
-//    argument list).
-// 2. The task func itself returns a non-nil error.
+//  1. The reflected function invocation panics (e.g. due to a mismatched
+//     argument list).
+//  2. The task func itself returns a non-nil error.
 func (t *Task) Call() (taskResults []*TaskResult, err error) {
 	// retrieve the span from the task's context and finish it as soon as this function returns
 	if span := opentracing.SpanFromContext(t.Context); span != nil {

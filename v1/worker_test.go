@@ -63,11 +63,17 @@ func (b *fakeBroker) Publish(ctx context.Context, task *tasks.Signature) error {
 	return b.publishErr
 }
 
-func (b *fakeBroker) GetPendingTasks(queue string) ([]*tasks.Signature, error) { return nil, nil }
-func (b *fakeBroker) GetPendingTaskCount(queue string) (int64, error)          { return 0, nil }
-func (b *fakeBroker) GetDelayedTasks() ([]*tasks.Signature, error)             { return nil, nil }
-func (b *fakeBroker) CancelDelayedTask(taskUUID string) error                  { return nil }
-func (b *fakeBroker) AdjustRoutingKey(s *tasks.Signature)                      {}
+func (b *fakeBroker) GetPendingTasks(ctx context.Context, queue string) ([]*tasks.Signature, error) {
+	return nil, nil
+}
+func (b *fakeBroker) GetPendingTaskCount(ctx context.Context, queue string) (int64, error) {
+	return 0, nil
+}
+func (b *fakeBroker) GetDelayedTasks(ctx context.Context) ([]*tasks.Signature, error) {
+	return nil, nil
+}
+func (b *fakeBroker) CancelDelayedTask(ctx context.Context, taskUUID string) error { return nil }
+func (b *fakeBroker) AdjustRoutingKey(s *tasks.Signature)                          {}
 
 // fakeBackend wraps a real eager backend and lets individual tests inject
 // errors from specific methods, to reach the error-wrapping branches in
@@ -90,67 +96,67 @@ func newFakeBackend() *fakeBackend {
 	return &fakeBackend{Backend: eagerbackend.New()}
 }
 
-func (b *fakeBackend) SetStatePending(s *tasks.Signature) error {
+func (b *fakeBackend) SetStatePending(ctx context.Context, s *tasks.Signature) error {
 	if b.onSetStatePending != nil {
 		return b.onSetStatePending(s)
 	}
-	return b.Backend.SetStatePending(s)
+	return b.Backend.SetStatePending(ctx, s)
 }
 
-func (b *fakeBackend) SetStateReceived(s *tasks.Signature) error {
+func (b *fakeBackend) SetStateReceived(ctx context.Context, s *tasks.Signature) error {
 	if b.onSetStateReceived != nil {
 		return b.onSetStateReceived(s)
 	}
-	return b.Backend.SetStateReceived(s)
+	return b.Backend.SetStateReceived(ctx, s)
 }
 
-func (b *fakeBackend) SetStateStarted(s *tasks.Signature) error {
+func (b *fakeBackend) SetStateStarted(ctx context.Context, s *tasks.Signature) error {
 	if b.onSetStateStarted != nil {
 		return b.onSetStateStarted(s)
 	}
-	return b.Backend.SetStateStarted(s)
+	return b.Backend.SetStateStarted(ctx, s)
 }
 
-func (b *fakeBackend) SetStateRetry(s *tasks.Signature) error {
+func (b *fakeBackend) SetStateRetry(ctx context.Context, s *tasks.Signature) error {
 	if b.onSetStateRetry != nil {
 		return b.onSetStateRetry(s)
 	}
-	return b.Backend.SetStateRetry(s)
+	return b.Backend.SetStateRetry(ctx, s)
 }
 
-func (b *fakeBackend) SetStateSuccess(s *tasks.Signature, results []*tasks.TaskResult) error {
+func (b *fakeBackend) SetStateSuccess(ctx context.Context, s *tasks.Signature, results []*tasks.TaskResult) error {
 	if b.onSetStateSuccess != nil {
 		return b.onSetStateSuccess(s, results)
 	}
-	return b.Backend.SetStateSuccess(s, results)
+	return b.Backend.SetStateSuccess(ctx, s, results)
 }
 
-func (b *fakeBackend) SetStateFailure(s *tasks.Signature, errStr string) error {
+func (b *fakeBackend) SetStateFailure(ctx context.Context, s *tasks.Signature, errStr string) error {
 	if b.onSetStateFailure != nil {
 		return b.onSetStateFailure(s, errStr)
 	}
-	return b.Backend.SetStateFailure(s, errStr)
+	return b.Backend.SetStateFailure(ctx, s, errStr)
 }
 
-func (b *fakeBackend) GroupCompleted(groupUUID string, groupTaskCount int) (bool, error) {
+func (b *fakeBackend) GroupCompleted(ctx context.Context, groupUUID string, groupTaskCount int) (bool, error) {
 	if b.onGroupCompleted != nil {
 		return b.onGroupCompleted(groupUUID, groupTaskCount)
 	}
-	return b.Backend.GroupCompleted(groupUUID, groupTaskCount)
+	return b.Backend.GroupCompleted(ctx, groupUUID, groupTaskCount)
 }
 
-func (b *fakeBackend) TriggerChord(groupUUID string) (bool, error) {
+func (b *fakeBackend) TriggerChord(ctx context.Context, groupUUID string) (bool, error) {
 	if b.onTriggerChord != nil {
 		return b.onTriggerChord(groupUUID)
 	}
-	return b.Backend.TriggerChord(groupUUID)
+	return b.Backend.TriggerChord(ctx, groupUUID)
 }
 
-func (b *fakeBackend) GroupTaskStates(groupUUID string, groupTaskCount int) ([]*tasks.TaskState, error) {
+func (b *fakeBackend) GroupTaskStates(ctx context.Context, groupUUID string, groupTaskCount int) ([]*tasks.TaskState, error) {
 	if b.onGroupTaskStates != nil {
 		return b.onGroupTaskStates(groupUUID, groupTaskCount)
 	}
-	return b.Backend.GroupTaskStates(groupUUID, groupTaskCount)
+	return b.Backend.GroupTaskStates(ctx, groupUUID, groupTaskCount)
 }
 
 // newEagerServerWithBackend is like newEagerServerAndWorker but lets the
@@ -242,7 +248,7 @@ func TestWorkerProcessUnregisteredTask(t *testing.T) {
 	sig, err := tasks.NewSignature("not_registered", nil)
 	require.NoError(t, err)
 
-	assert.NoError(t, worker.Process(sig))
+	assert.NoError(t, worker.Process(context.Background(), sig))
 }
 
 func TestWorkerProcessSuccess(t *testing.T) {
@@ -259,9 +265,9 @@ func TestWorkerProcessSuccess(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	require.NoError(t, worker.Process(sig))
+	require.NoError(t, worker.Process(context.Background(), sig))
 
-	state, err := server.GetBackend().GetState(sig.UUID)
+	state, err := server.GetBackend().GetState(context.Background(), sig.UUID)
 	require.NoError(t, err)
 	require.True(t, state.IsSuccess())
 	require.Len(t, state.Results, 1)
@@ -279,10 +285,10 @@ func TestWorkerProcessMalformedSignature(t *testing.T) {
 	sig, err := tasks.NewSignature("needs_int", []tasks.Arg{{Type: "not_a_real_type", Value: "x"}})
 	require.NoError(t, err)
 
-	err = worker.Process(sig)
+	err = worker.Process(context.Background(), sig)
 	assert.Error(t, err)
 
-	state, err2 := server.GetBackend().GetState(sig.UUID)
+	state, err2 := server.GetBackend().GetState(context.Background(), sig.UUID)
 	require.NoError(t, err2)
 	assert.True(t, state.IsFailure())
 }
@@ -298,9 +304,9 @@ func TestWorkerProcessTaskErrorNoRetry(t *testing.T) {
 	sig, err := tasks.NewSignature("failing_task", nil)
 	require.NoError(t, err)
 
-	require.NoError(t, worker.Process(sig))
+	require.NoError(t, worker.Process(context.Background(), sig))
 
-	state, err2 := server.GetBackend().GetState(sig.UUID)
+	state, err2 := server.GetBackend().GetState(context.Background(), sig.UUID)
 	require.NoError(t, err2)
 	assert.True(t, state.IsFailure())
 	assert.Equal(t, "boom", state.Error)
@@ -320,11 +326,11 @@ func TestWorkerProcessTaskErrorWithRetry(t *testing.T) {
 	require.NoError(t, err)
 	sig.RetryCount = 1
 
-	require.NoError(t, worker.Process(sig))
+	require.NoError(t, worker.Process(context.Background(), sig))
 
 	assert.EqualValues(t, 2, atomic.LoadInt32(&attempts))
 
-	state, err2 := server.GetBackend().GetState(sig.UUID)
+	state, err2 := server.GetBackend().GetState(context.Background(), sig.UUID)
 	require.NoError(t, err2)
 	assert.True(t, state.IsFailure())
 }
@@ -347,7 +353,7 @@ func TestWorkerProcessTaskErrorWithCustomTimeoutFunc(t *testing.T) {
 	require.NoError(t, err)
 	sig.RetryCount = 1
 
-	require.NoError(t, worker.Process(sig))
+	require.NoError(t, worker.Process(context.Background(), sig))
 	assert.EqualValues(t, 1, atomic.LoadInt32(&usedCustomTimeout))
 }
 
@@ -363,9 +369,9 @@ func TestWorkerProcessRetryTaskLater(t *testing.T) {
 	require.NoError(t, err)
 	sig.RetryCount = 2
 
-	require.NoError(t, worker.Process(sig))
+	require.NoError(t, worker.Process(context.Background(), sig))
 
-	state, err2 := server.GetBackend().GetState(sig.UUID)
+	state, err2 := server.GetBackend().GetState(context.Background(), sig.UUID)
 	require.NoError(t, err2)
 	assert.True(t, state.IsFailure())
 	assert.Equal(t, "Task failed too many times.", state.Error)
@@ -384,7 +390,7 @@ func TestWorkerProcessPreAndPostTaskHandlers(t *testing.T) {
 	sig, err := tasks.NewSignature("test_task", nil)
 	require.NoError(t, err)
 
-	require.NoError(t, worker.Process(sig))
+	require.NoError(t, worker.Process(context.Background(), sig))
 	assert.EqualValues(t, 1, atomic.LoadInt32(&preCalls))
 	assert.EqualValues(t, 1, atomic.LoadInt32(&postCalls))
 }
@@ -408,7 +414,7 @@ func TestWorkerProcessOnSuccessCallback(t *testing.T) {
 	require.NoError(t, err)
 	sig.OnSuccess = []*tasks.Signature{cb}
 
-	require.NoError(t, worker.Process(sig))
+	require.NoError(t, worker.Process(context.Background(), sig))
 	assert.EqualValues(t, 1, atomic.LoadInt32(&called))
 	assert.Equal(t, int64(42), gotValue)
 }
@@ -432,7 +438,7 @@ func TestWorkerProcessOnErrorCallback(t *testing.T) {
 	require.NoError(t, err)
 	sig.OnError = []*tasks.Signature{cb}
 
-	require.NoError(t, worker.Process(sig))
+	require.NoError(t, worker.Process(context.Background(), sig))
 	assert.Equal(t, "kaboom", gotMessage)
 }
 
@@ -448,7 +454,7 @@ func TestWorkerProcessStopTaskDeletionOnError(t *testing.T) {
 	require.NoError(t, err)
 	sig.StopTaskDeletionOnError = true
 
-	err = worker.Process(sig)
+	err = worker.Process(context.Background(), sig)
 	assert.ErrorIs(t, err, errs.ErrStopTaskDeletion)
 }
 
@@ -465,7 +471,7 @@ func TestWorkerProcessSetStateReceivedError(t *testing.T) {
 	sig, err := tasks.NewSignature("test_task", nil)
 	require.NoError(t, err)
 
-	err = worker.Process(sig)
+	err = worker.Process(context.Background(), sig)
 	assert.ErrorContains(t, err, "received failed")
 }
 
@@ -482,7 +488,7 @@ func TestWorkerProcessSetStateStartedError(t *testing.T) {
 	sig, err := tasks.NewSignature("test_task", nil)
 	require.NoError(t, err)
 
-	err = worker.Process(sig)
+	err = worker.Process(context.Background(), sig)
 	assert.ErrorContains(t, err, "started failed")
 }
 
@@ -502,7 +508,7 @@ func TestWorkerProcessSetStateRetryErrorInTaskRetry(t *testing.T) {
 	require.NoError(t, err)
 	sig.RetryCount = 1
 
-	err = worker.Process(sig)
+	err = worker.Process(context.Background(), sig)
 	assert.ErrorContains(t, err, "retry state failed")
 }
 
@@ -522,7 +528,7 @@ func TestWorkerProcessSetStateRetryErrorInRetryTaskIn(t *testing.T) {
 	require.NoError(t, err)
 	sig.RetryCount = 2
 
-	err = worker.Process(sig)
+	err = worker.Process(context.Background(), sig)
 	assert.ErrorContains(t, err, "retry state failed")
 }
 
@@ -539,7 +545,7 @@ func TestWorkerProcessSetStateSuccessError(t *testing.T) {
 	sig, err := tasks.NewSignature("test_task", nil)
 	require.NoError(t, err)
 
-	err = worker.Process(sig)
+	err = worker.Process(context.Background(), sig)
 	assert.ErrorContains(t, err, "success state failed")
 }
 
@@ -558,7 +564,7 @@ func TestWorkerProcessSetStateFailureError(t *testing.T) {
 	sig, err := tasks.NewSignature("failing_task", nil)
 	require.NoError(t, err)
 
-	err = worker.Process(sig)
+	err = worker.Process(context.Background(), sig)
 	assert.ErrorContains(t, err, "failure state failed")
 }
 
@@ -579,7 +585,7 @@ func TestWorkerProcessGroupCompletedError(t *testing.T) {
 	sig.ChordCallback, err = tasks.NewSignature("test_task", nil)
 	require.NoError(t, err)
 
-	err = worker.Process(sig)
+	err = worker.Process(context.Background(), sig)
 	assert.ErrorContains(t, err, "group completed check failed")
 }
 
@@ -599,7 +605,7 @@ func TestWorkerProcessGroupNotCompletedYet(t *testing.T) {
 	sig.ChordCallback, err = tasks.NewSignature("test_task", nil)
 	require.NoError(t, err)
 
-	assert.NoError(t, worker.Process(sig))
+	assert.NoError(t, worker.Process(context.Background(), sig))
 }
 
 func TestWorkerProcessTriggerChordError(t *testing.T) {
@@ -620,7 +626,7 @@ func TestWorkerProcessTriggerChordError(t *testing.T) {
 	sig.ChordCallback, err = tasks.NewSignature("test_task", nil)
 	require.NoError(t, err)
 
-	err = worker.Process(sig)
+	err = worker.Process(context.Background(), sig)
 	assert.ErrorContains(t, err, "trigger chord failed")
 }
 
@@ -641,7 +647,7 @@ func TestWorkerProcessChordAlreadyTriggered(t *testing.T) {
 	sig.ChordCallback, err = tasks.NewSignature("test_task", nil)
 	require.NoError(t, err)
 
-	assert.NoError(t, worker.Process(sig))
+	assert.NoError(t, worker.Process(context.Background(), sig))
 }
 
 func TestWorkerProcessGroupTaskStatesError(t *testing.T) {
@@ -666,7 +672,7 @@ func TestWorkerProcessGroupTaskStatesError(t *testing.T) {
 
 	// GroupTaskStates errors are only logged, not propagated, so the task is
 	// still considered processed successfully from the caller's perspective.
-	assert.NoError(t, worker.Process(sig))
+	assert.NoError(t, worker.Process(context.Background(), sig))
 }
 
 func TestWorkerProcessGroupTaskNotSuccessfulSkipsChordCallback(t *testing.T) {
@@ -691,7 +697,7 @@ func TestWorkerProcessGroupTaskNotSuccessfulSkipsChordCallback(t *testing.T) {
 	sig.ChordCallback, err = tasks.NewSignature("test_task", nil)
 	require.NoError(t, err)
 
-	assert.NoError(t, worker.Process(sig))
+	assert.NoError(t, worker.Process(context.Background(), sig))
 }
 
 func TestWorkerProcessGroupTaskStatesSuccessSendsChordCallback(t *testing.T) {
@@ -715,11 +721,11 @@ func TestWorkerProcessGroupTaskStatesSuccessSendsChordCallback(t *testing.T) {
 	sig.ChordCallback, err = tasks.NewSignature("test_task", nil)
 	require.NoError(t, err)
 
-	require.NoError(t, backend.Backend.InitGroup(sig.GroupUUID, []string{sig.UUID}))
+	require.NoError(t, backend.Backend.InitGroup(context.Background(), sig.GroupUUID, []string{sig.UUID}))
 
-	require.NoError(t, worker.Process(sig))
+	require.NoError(t, worker.Process(context.Background(), sig))
 
-	callbackState, err := backend.Backend.GetState(sig.ChordCallback.UUID)
+	callbackState, err := backend.Backend.GetState(context.Background(), sig.ChordCallback.UUID)
 	require.NoError(t, err)
 	assert.True(t, callbackState.IsSuccess())
 }
@@ -738,9 +744,9 @@ func TestWorkerProcessUnreflectableResultLogsWarningButSucceeds(t *testing.T) {
 	sig, err := tasks.NewSignature("returns_map", nil)
 	require.NoError(t, err)
 
-	require.NoError(t, worker.Process(sig))
+	require.NoError(t, worker.Process(context.Background(), sig))
 
-	state, err := server.GetBackend().GetState(sig.UUID)
+	state, err := server.GetBackend().GetState(context.Background(), sig.UUID)
 	require.NoError(t, err)
 	assert.True(t, state.IsSuccess())
 }
@@ -759,7 +765,7 @@ func TestWorkerProcessTaskFailedWithErrorHandler(t *testing.T) {
 	sig, err := tasks.NewSignature("failing_task3", nil)
 	require.NoError(t, err)
 
-	require.NoError(t, worker.Process(sig))
+	require.NoError(t, worker.Process(context.Background(), sig))
 	require.Error(t, handledErr)
 	assert.Equal(t, "kaboom", handledErr.Error())
 }
@@ -796,7 +802,7 @@ func TestWorkerProcessChordCallbackSendTaskError(t *testing.T) {
 	// main task itself is never published through the faulty broker; only
 	// the chord callback's SendTask call at the end of taskSucceeded goes
 	// through broker.Publish and fails.
-	err = worker.Process(sig)
+	err = worker.Process(context.Background(), sig)
 	assert.ErrorContains(t, err, "publish failed")
 }
 

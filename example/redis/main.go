@@ -289,7 +289,7 @@ func send() error {
 		return fmt.Errorf("Could not send task: %s", err.Error())
 	}
 
-	results, err := asyncResult.Get(time.Duration(time.Millisecond * 5))
+	results, err := asyncResult.Get(ctx, time.Duration(time.Millisecond*5))
 	if err != nil {
 		return fmt.Errorf("Getting task result failed with error: %s", err.Error())
 	}
@@ -303,7 +303,7 @@ func send() error {
 		return fmt.Errorf("Could not send task: %s", err.Error())
 	}
 
-	results, err = asyncResult.Get(time.Duration(time.Millisecond * 5))
+	results, err = asyncResult.Get(ctx, time.Duration(time.Millisecond*5))
 	if err != nil {
 		return fmt.Errorf("Getting task result failed with error: %s", err.Error())
 	}
@@ -314,7 +314,7 @@ func send() error {
 		return fmt.Errorf("Could not send task: %s", err.Error())
 	}
 
-	results, err = asyncResult.Get(time.Duration(time.Millisecond * 5))
+	results, err = asyncResult.Get(ctx, time.Duration(time.Millisecond*5))
 	if err != nil {
 		return fmt.Errorf("Getting task result failed with error: %s", err.Error())
 	}
@@ -325,7 +325,7 @@ func send() error {
 		return fmt.Errorf("Could not send task: %s", err.Error())
 	}
 
-	results, err = asyncResult.Get(time.Duration(time.Millisecond * 5))
+	results, err = asyncResult.Get(ctx, time.Duration(time.Millisecond*5))
 	if err != nil {
 		return fmt.Errorf("Getting task result failed with error: %s", err.Error())
 	}
@@ -336,7 +336,7 @@ func send() error {
 		return fmt.Errorf("Could not send task: %s", err.Error())
 	}
 
-	results, err = asyncResult.Get(time.Duration(time.Millisecond * 5))
+	results, err = asyncResult.Get(ctx, time.Duration(time.Millisecond*5))
 	if err != nil {
 		return fmt.Errorf("Getting task result failed with error: %s", err.Error())
 	}
@@ -361,7 +361,7 @@ func send() error {
 	}
 
 	for _, asyncResult := range asyncResults {
-		results, err = asyncResult.Get(time.Duration(time.Millisecond * 5))
+		results, err = asyncResult.Get(ctx, time.Duration(time.Millisecond*5))
 		if err != nil {
 			return fmt.Errorf("Getting task result failed with error: %s", err.Error())
 		}
@@ -392,7 +392,7 @@ func send() error {
 		return fmt.Errorf("Could not send chord: %s", err.Error())
 	}
 
-	results, err = chordAsyncResult.Get(time.Duration(time.Millisecond * 5))
+	results, err = chordAsyncResult.Get(ctx, time.Duration(time.Millisecond*5))
 	if err != nil {
 		return fmt.Errorf("Getting chord result failed with error: %s", err.Error())
 	}
@@ -412,7 +412,7 @@ func send() error {
 		return fmt.Errorf("Could not send chain: %s", err.Error())
 	}
 
-	results, err = chainAsyncResult.Get(time.Duration(time.Millisecond * 5))
+	results, err = chainAsyncResult.Get(ctx, time.Duration(time.Millisecond*5))
 	if err != nil {
 		return fmt.Errorf("Getting chain result failed with error: %s", err.Error())
 	}
@@ -425,7 +425,7 @@ func send() error {
 		return fmt.Errorf("Could not send task: %s", err.Error())
 	}
 
-	_, err = asyncResult.Get(time.Duration(time.Millisecond * 5))
+	_, err = asyncResult.Get(ctx, time.Duration(time.Millisecond*5))
 	if err == nil {
 		return errors.New("Error should not be nil if task panicked")
 	}
@@ -438,7 +438,7 @@ func send() error {
 		return fmt.Errorf("Could not send task: %s", err.Error())
 	}
 
-	results, err = asyncResult.Get(time.Duration(time.Millisecond * 5))
+	results, err = asyncResult.Get(ctx, time.Duration(time.Millisecond*5))
 	if err != nil {
 		return fmt.Errorf("Getting long running task result failed with error: %s", err.Error())
 	}

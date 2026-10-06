@@ -1,6 +1,7 @@
 package integration_test
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"reflect"
@@ -99,7 +100,7 @@ func TestWorkerOnlyConsumesRegisteredTaskRedis(t *testing.T) {
 	actualResults := make([]int64, 2)
 
 	for i, asyncResult := range asyncResults {
-		results, err := asyncResult.Get(time.Duration(time.Millisecond * 5))
+		results, err := asyncResult.Get(context.Background(), time.Duration(time.Millisecond*5))
 		if err != nil {
 			t.Error(err)
 		}

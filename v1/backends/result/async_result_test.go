@@ -1,6 +1,7 @@
 package result_test
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
 	"time"
@@ -33,18 +34,18 @@ func newPendingThenBackend(backend iface.Backend, pendingLeft map[string]int) *p
 	return &pendingThenBackend{Backend: backend, pendingLeft: pendingLeft}
 }
 
-func (b *pendingThenBackend) GetState(taskUUID string) (*tasks.TaskState, error) {
+func (b *pendingThenBackend) GetState(ctx context.Context, taskUUID string) (*tasks.TaskState, error) {
 	if remaining, ok := b.pendingLeft[taskUUID]; ok && remaining > 0 {
 		b.pendingLeft[taskUUID] = remaining - 1
 		return &tasks.TaskState{TaskUUID: taskUUID, State: tasks.StatePending}, nil
 	}
-	return b.Backend.GetState(taskUUID)
+	return b.Backend.GetState(ctx, taskUUID)
 }
 
 func TestAsyncResult_Touch_BackendNotConfigured(t *testing.T) {
 	asyncResult := result.NewAsyncResult(&tasks.Signature{UUID: "1"}, nil)
 
-	results, err := asyncResult.Touch()
+	results, err := asyncResult.Touch(context.Background())
 	assert.Nil(t, results)
 	assert.Equal(t, result.ErrBackendNotConfigured, err)
 }
@@ -52,10 +53,10 @@ func TestAsyncResult_Touch_BackendNotConfigured(t *testing.T) {
 func TestAsyncResult_Touch_Pending(t *testing.T) {
 	backend := eager.New()
 	signature := &tasks.Signature{UUID: "1"}
-	require.NoError(t, backend.SetStatePending(signature))
+	require.NoError(t, backend.SetStatePending(context.Background(), signature))
 
 	asyncResult := result.NewAsyncResult(signature, backend)
-	results, err := asyncResult.Touch()
+	results, err := asyncResult.Touch(context.Background())
 	assert.Nil(t, results)
 	assert.NoError(t, err)
 }
@@ -63,10 +64,10 @@ func TestAsyncResult_Touch_Pending(t *testing.T) {
 func TestAsyncResult_Touch_Failure(t *testing.T) {
 	backend := eager.New()
 	signature := &tasks.Signature{UUID: "1"}
-	require.NoError(t, backend.SetStateFailure(signature, "something went wrong"))
+	require.NoError(t, backend.SetStateFailure(context.Background(), signature, "something went wrong"))
 
 	asyncResult := result.NewAsyncResult(signature, backend)
-	results, err := asyncResult.Touch()
+	results, err := asyncResult.Touch(context.Background())
 	assert.Nil(t, results)
 	assert.EqualError(t, err, "something went wrong")
 }
@@ -74,10 +75,10 @@ func TestAsyncResult_Touch_Failure(t *testing.T) {
 func TestAsyncResult_Touch_Success(t *testing.T) {
 	backend := eager.New()
 	signature := &tasks.Signature{UUID: "1"}
-	require.NoError(t, backend.SetStateSuccess(signature, successResults()))
+	require.NoError(t, backend.SetStateSuccess(context.Background(), signature, successResults()))
 
 	asyncResult := result.NewAsyncResult(signature, backend)
-	results, err := asyncResult.Touch()
+	results, err := asyncResult.Touch(context.Background())
 	require.NoError(t, err)
 	require.Len(t, results, 1)
 	assert.Equal(t, int64(300), results[0].Interface())
@@ -86,12 +87,12 @@ func TestAsyncResult_Touch_Success(t *testing.T) {
 func TestAsyncResult_Get(t *testing.T) {
 	inner := eager.New()
 	signature := &tasks.Signature{UUID: "1"}
-	require.NoError(t, inner.SetStateSuccess(signature, successResults()))
+	require.NoError(t, inner.SetStateSuccess(context.Background(), signature, successResults()))
 
 	backend := newPendingThenBackend(inner, map[string]int{"1": 2})
 	asyncResult := result.NewAsyncResult(signature, backend)
 
-	results, err := asyncResult.Get(time.Millisecond)
+	results, err := asyncResult.Get(context.Background(), time.Millisecond)
 	require.NoError(t, err)
 	require.Len(t, results, 1)
 	assert.Equal(t, int64(300), results[0].Interface())
@@ -100,12 +101,12 @@ func TestAsyncResult_Get(t *testing.T) {
 func TestAsyncResult_GetWithTimeout_Success(t *testing.T) {
 	inner := eager.New()
 	signature := &tasks.Signature{UUID: "1"}
-	require.NoError(t, inner.SetStateSuccess(signature, successResults()))
+	require.NoError(t, inner.SetStateSuccess(context.Background(), signature, successResults()))
 
 	backend := newPendingThenBackend(inner, map[string]int{"1": 2})
 	asyncResult := result.NewAsyncResult(signature, backend)
 
-	results, err := asyncResult.GetWithTimeout(100*time.Millisecond, time.Millisecond)
+	results, err := asyncResult.GetWithTimeout(context.Background(), 100*time.Millisecond, time.Millisecond)
 	require.NoError(t, err)
 	require.Len(t, results, 1)
 }
@@ -113,10 +114,10 @@ func TestAsyncResult_GetWithTimeout_Success(t *testing.T) {
 func TestAsyncResult_GetWithTimeout_TimeoutReached(t *testing.T) {
 	backend := eager.New()
 	signature := &tasks.Signature{UUID: "1"}
-	require.NoError(t, backend.SetStatePending(signature))
+	require.NoError(t, backend.SetStatePending(context.Background(), signature))
 
 	asyncResult := result.NewAsyncResult(signature, backend)
-	results, err := asyncResult.GetWithTimeout(5*time.Millisecond, 20*time.Millisecond)
+	results, err := asyncResult.GetWithTimeout(context.Background(), 5*time.Millisecond, 20*time.Millisecond)
 	assert.Nil(t, results)
 	assert.Equal(t, result.ErrTimeoutReached, err)
 }
@@ -124,16 +125,16 @@ func TestAsyncResult_GetWithTimeout_TimeoutReached(t *testing.T) {
 func TestAsyncResult_GetState_CachesCompletedState(t *testing.T) {
 	backend := eager.New()
 	signature := &tasks.Signature{UUID: "1"}
-	require.NoError(t, backend.SetStateSuccess(signature, successResults()))
+	require.NoError(t, backend.SetStateSuccess(context.Background(), signature, successResults()))
 
 	asyncResult := result.NewAsyncResult(signature, backend)
-	first := asyncResult.GetState()
+	first := asyncResult.GetState(context.Background())
 	require.NotNil(t, first)
 	assert.True(t, first.IsSuccess())
 
-	require.NoError(t, backend.PurgeState(signature.UUID))
+	require.NoError(t, backend.PurgeState(context.Background(), signature.UUID))
 
-	second := asyncResult.GetState()
+	second := asyncResult.GetState(context.Background())
 	assert.Same(t, first, second)
 }
 
@@ -142,7 +143,7 @@ func TestAsyncResult_GetState_BackendError(t *testing.T) {
 	signature := &tasks.Signature{UUID: "missing"}
 
 	asyncResult := result.NewAsyncResult(signature, backend)
-	state := asyncResult.GetState()
+	state := asyncResult.GetState(context.Background())
 	require.NotNil(t, state)
 	assert.Empty(t, state.State)
 }
@@ -157,7 +158,7 @@ func newChainSignatures(uuids ...string) []*tasks.Signature {
 
 func TestChainAsyncResult_Get_BackendNotConfigured(t *testing.T) {
 	chainResult := result.NewChainAsyncResult(newChainSignatures("1", "2"), nil)
-	results, err := chainResult.Get(time.Millisecond)
+	results, err := chainResult.Get(context.Background(), time.Millisecond)
 	assert.Nil(t, results)
 	assert.Equal(t, result.ErrBackendNotConfigured, err)
 }
@@ -166,11 +167,11 @@ func TestChainAsyncResult_Get_Success(t *testing.T) {
 	backend := eager.New()
 	signatures := newChainSignatures("1", "2", "3")
 	for _, s := range signatures {
-		require.NoError(t, backend.SetStateSuccess(s, successResults()))
+		require.NoError(t, backend.SetStateSuccess(context.Background(), s, successResults()))
 	}
 
 	chainResult := result.NewChainAsyncResult(signatures, backend)
-	results, err := chainResult.Get(time.Millisecond)
+	results, err := chainResult.Get(context.Background(), time.Millisecond)
 	require.NoError(t, err)
 	require.Len(t, results, 1)
 }
@@ -178,18 +179,18 @@ func TestChainAsyncResult_Get_Success(t *testing.T) {
 func TestChainAsyncResult_Get_Failure(t *testing.T) {
 	backend := eager.New()
 	signatures := newChainSignatures("1", "2")
-	require.NoError(t, backend.SetStateSuccess(signatures[0], successResults()))
-	require.NoError(t, backend.SetStateFailure(signatures[1], "boom"))
+	require.NoError(t, backend.SetStateSuccess(context.Background(), signatures[0], successResults()))
+	require.NoError(t, backend.SetStateFailure(context.Background(), signatures[1], "boom"))
 
 	chainResult := result.NewChainAsyncResult(signatures, backend)
-	results, err := chainResult.Get(time.Millisecond)
+	results, err := chainResult.Get(context.Background(), time.Millisecond)
 	assert.Nil(t, results)
 	assert.EqualError(t, err, "boom")
 }
 
 func TestChainAsyncResult_GetWithTimeout_BackendNotConfigured(t *testing.T) {
 	chainResult := result.NewChainAsyncResult(newChainSignatures("1"), nil)
-	results, err := chainResult.GetWithTimeout(time.Millisecond, time.Millisecond)
+	results, err := chainResult.GetWithTimeout(context.Background(), time.Millisecond, time.Millisecond)
 	assert.Nil(t, results)
 	assert.Equal(t, result.ErrBackendNotConfigured, err)
 }
@@ -197,8 +198,8 @@ func TestChainAsyncResult_GetWithTimeout_BackendNotConfigured(t *testing.T) {
 func TestChainAsyncResult_GetWithTimeout_Success(t *testing.T) {
 	inner := eager.New()
 	signatures := newChainSignatures("1", "2")
-	require.NoError(t, inner.SetStateSuccess(signatures[0], successResults()))
-	require.NoError(t, inner.SetStateSuccess(signatures[1], successResults()))
+	require.NoError(t, inner.SetStateSuccess(context.Background(), signatures[0], successResults()))
+	require.NoError(t, inner.SetStateSuccess(context.Background(), signatures[1], successResults()))
 
 	// signature "2" is both the last signature and the one re-touched
 	// directly, so it is read twice per polling round; 3 pending reads
@@ -206,7 +207,7 @@ func TestChainAsyncResult_GetWithTimeout_Success(t *testing.T) {
 	backend := newPendingThenBackend(inner, map[string]int{"2": 3})
 	chainResult := result.NewChainAsyncResult(signatures, backend)
 
-	results, err := chainResult.GetWithTimeout(200*time.Millisecond, time.Millisecond)
+	results, err := chainResult.GetWithTimeout(context.Background(), 200*time.Millisecond, time.Millisecond)
 	require.NoError(t, err)
 	require.Len(t, results, 1)
 }
@@ -214,11 +215,11 @@ func TestChainAsyncResult_GetWithTimeout_Success(t *testing.T) {
 func TestChainAsyncResult_GetWithTimeout_EarlyFailure(t *testing.T) {
 	backend := eager.New()
 	signatures := newChainSignatures("1", "2")
-	require.NoError(t, backend.SetStateFailure(signatures[0], "early failure"))
-	require.NoError(t, backend.SetStatePending(signatures[1]))
+	require.NoError(t, backend.SetStateFailure(context.Background(), signatures[0], "early failure"))
+	require.NoError(t, backend.SetStatePending(context.Background(), signatures[1]))
 
 	chainResult := result.NewChainAsyncResult(signatures, backend)
-	results, err := chainResult.GetWithTimeout(200*time.Millisecond, 2*time.Millisecond)
+	results, err := chainResult.GetWithTimeout(context.Background(), 200*time.Millisecond, 2*time.Millisecond)
 	assert.Nil(t, results)
 	assert.EqualError(t, err, "early failure")
 }
@@ -226,11 +227,11 @@ func TestChainAsyncResult_GetWithTimeout_EarlyFailure(t *testing.T) {
 func TestChainAsyncResult_GetWithTimeout_LastFailure(t *testing.T) {
 	backend := eager.New()
 	signatures := newChainSignatures("1", "2")
-	require.NoError(t, backend.SetStateSuccess(signatures[0], successResults()))
-	require.NoError(t, backend.SetStateFailure(signatures[1], "last failure"))
+	require.NoError(t, backend.SetStateSuccess(context.Background(), signatures[0], successResults()))
+	require.NoError(t, backend.SetStateFailure(context.Background(), signatures[1], "last failure"))
 
 	chainResult := result.NewChainAsyncResult(signatures, backend)
-	results, err := chainResult.GetWithTimeout(200*time.Millisecond, 2*time.Millisecond)
+	results, err := chainResult.GetWithTimeout(context.Background(), 200*time.Millisecond, 2*time.Millisecond)
 	assert.Nil(t, results)
 	assert.EqualError(t, err, "last failure")
 }
@@ -238,10 +239,10 @@ func TestChainAsyncResult_GetWithTimeout_LastFailure(t *testing.T) {
 func TestChainAsyncResult_GetWithTimeout_TimeoutReached(t *testing.T) {
 	backend := eager.New()
 	signatures := newChainSignatures("1")
-	require.NoError(t, backend.SetStatePending(signatures[0]))
+	require.NoError(t, backend.SetStatePending(context.Background(), signatures[0]))
 
 	chainResult := result.NewChainAsyncResult(signatures, backend)
-	results, err := chainResult.GetWithTimeout(5*time.Millisecond, 20*time.Millisecond)
+	results, err := chainResult.GetWithTimeout(context.Background(), 5*time.Millisecond, 20*time.Millisecond)
 	assert.Nil(t, results)
 	assert.Equal(t, result.ErrTimeoutReached, err)
 }
@@ -257,57 +258,57 @@ func newChordAsyncResult(backend iface.Backend, groupUUIDs []string, callbackUUI
 
 func TestChordAsyncResult_Get_BackendNotConfigured(t *testing.T) {
 	chordResult := newChordAsyncResult(nil, []string{"1"}, "cb")
-	results, err := chordResult.Get(time.Millisecond)
+	results, err := chordResult.Get(context.Background(), time.Millisecond)
 	assert.Nil(t, results)
 	assert.Equal(t, result.ErrBackendNotConfigured, err)
 }
 
 func TestChordAsyncResult_Get_Success(t *testing.T) {
 	backend := eager.New()
-	require.NoError(t, backend.SetStateSuccess(&tasks.Signature{UUID: "1"}, successResults()))
-	require.NoError(t, backend.SetStateSuccess(&tasks.Signature{UUID: "2"}, successResults()))
-	require.NoError(t, backend.SetStateSuccess(&tasks.Signature{UUID: "cb"}, successResults()))
+	require.NoError(t, backend.SetStateSuccess(context.Background(), &tasks.Signature{UUID: "1"}, successResults()))
+	require.NoError(t, backend.SetStateSuccess(context.Background(), &tasks.Signature{UUID: "2"}, successResults()))
+	require.NoError(t, backend.SetStateSuccess(context.Background(), &tasks.Signature{UUID: "cb"}, successResults()))
 
 	chordResult := newChordAsyncResult(backend, []string{"1", "2"}, "cb")
-	results, err := chordResult.Get(time.Millisecond)
+	results, err := chordResult.Get(context.Background(), time.Millisecond)
 	require.NoError(t, err)
 	require.Len(t, results, 1)
 }
 
 func TestChordAsyncResult_Get_GroupFailure(t *testing.T) {
 	backend := eager.New()
-	require.NoError(t, backend.SetStateFailure(&tasks.Signature{UUID: "1"}, "group task failed"))
+	require.NoError(t, backend.SetStateFailure(context.Background(), &tasks.Signature{UUID: "1"}, "group task failed"))
 
 	chordResult := newChordAsyncResult(backend, []string{"1"}, "cb")
-	results, err := chordResult.Get(time.Millisecond)
+	results, err := chordResult.Get(context.Background(), time.Millisecond)
 	assert.Nil(t, results)
 	assert.EqualError(t, err, "group task failed")
 }
 
 func TestChordAsyncResult_GetWithTimeout_BackendNotConfigured(t *testing.T) {
 	chordResult := newChordAsyncResult(nil, []string{"1"}, "cb")
-	results, err := chordResult.GetWithTimeout(time.Millisecond, time.Millisecond)
+	results, err := chordResult.GetWithTimeout(context.Background(), time.Millisecond, time.Millisecond)
 	assert.Nil(t, results)
 	assert.Equal(t, result.ErrBackendNotConfigured, err)
 }
 
 func TestChordAsyncResult_GetWithTimeout_Success(t *testing.T) {
 	inner := eager.New()
-	require.NoError(t, inner.SetStateSuccess(&tasks.Signature{UUID: "1"}, successResults()))
-	require.NoError(t, inner.SetStateSuccess(&tasks.Signature{UUID: "cb"}, successResults()))
+	require.NoError(t, inner.SetStateSuccess(context.Background(), &tasks.Signature{UUID: "1"}, successResults()))
+	require.NoError(t, inner.SetStateSuccess(context.Background(), &tasks.Signature{UUID: "cb"}, successResults()))
 
 	backend := newPendingThenBackend(inner, map[string]int{"cb": 1})
 	chordResult := newChordAsyncResult(backend, []string{"1"}, "cb")
 
-	results, err := chordResult.GetWithTimeout(200*time.Millisecond, time.Millisecond)
+	results, err := chordResult.GetWithTimeout(context.Background(), 200*time.Millisecond, time.Millisecond)
 	require.NoError(t, err)
 	require.Len(t, results, 1)
 }
 
 func TestChordAsyncResult_GetWithTimeout_GroupFailure(t *testing.T) {
 	backend := eager.New()
-	require.NoError(t, backend.SetStateFailure(&tasks.Signature{UUID: "1"}, "group task failed"))
-	require.NoError(t, backend.SetStatePending(&tasks.Signature{UUID: "cb"}))
+	require.NoError(t, backend.SetStateFailure(context.Background(), &tasks.Signature{UUID: "1"}, "group task failed"))
+	require.NoError(t, backend.SetStatePending(context.Background(), &tasks.Signature{UUID: "cb"}))
 
 	chordResult := newChordAsyncResult(backend, []string{"1"}, "cb")
 	// NOTE: production code returns (nil, err) here using the outer `err`
@@ -315,32 +316,32 @@ func TestChordAsyncResult_GetWithTimeout_GroupFailure(t *testing.T) {
 	// this failed Touch() call, so on the very first iteration this
 	// actually yields (nil, nil). This test documents that existing
 	// behavior rather than the apparently-intended one.
-	results, err := chordResult.GetWithTimeout(200*time.Millisecond, 2*time.Millisecond)
+	results, err := chordResult.GetWithTimeout(context.Background(), 200*time.Millisecond, 2*time.Millisecond)
 	assert.Nil(t, results)
 	assert.NoError(t, err)
 }
 
 func TestChordAsyncResult_GetWithTimeout_CallbackFailure(t *testing.T) {
 	backend := eager.New()
-	require.NoError(t, backend.SetStateSuccess(&tasks.Signature{UUID: "1"}, successResults()))
-	require.NoError(t, backend.SetStateFailure(&tasks.Signature{UUID: "cb"}, "callback failed"))
+	require.NoError(t, backend.SetStateSuccess(context.Background(), &tasks.Signature{UUID: "1"}, successResults()))
+	require.NoError(t, backend.SetStateFailure(context.Background(), &tasks.Signature{UUID: "cb"}, "callback failed"))
 
 	chordResult := newChordAsyncResult(backend, []string{"1"}, "cb")
 	// NOTE: production code swallows the callback error and returns
 	// (nil, nil) instead of (nil, err) here. This test documents that
 	// existing behavior.
-	results, err := chordResult.GetWithTimeout(200*time.Millisecond, 2*time.Millisecond)
+	results, err := chordResult.GetWithTimeout(context.Background(), 200*time.Millisecond, 2*time.Millisecond)
 	assert.Nil(t, results)
 	assert.NoError(t, err)
 }
 
 func TestChordAsyncResult_GetWithTimeout_TimeoutReached(t *testing.T) {
 	backend := eager.New()
-	require.NoError(t, backend.SetStatePending(&tasks.Signature{UUID: "1"}))
-	require.NoError(t, backend.SetStatePending(&tasks.Signature{UUID: "cb"}))
+	require.NoError(t, backend.SetStatePending(context.Background(), &tasks.Signature{UUID: "1"}))
+	require.NoError(t, backend.SetStatePending(context.Background(), &tasks.Signature{UUID: "cb"}))
 
 	chordResult := newChordAsyncResult(backend, []string{"1"}, "cb")
-	results, err := chordResult.GetWithTimeout(5*time.Millisecond, 20*time.Millisecond)
+	results, err := chordResult.GetWithTimeout(context.Background(), 5*time.Millisecond, 20*time.Millisecond)
 	assert.Nil(t, results)
 	assert.Equal(t, result.ErrTimeoutReached, err)
 }

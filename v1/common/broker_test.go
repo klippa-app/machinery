@@ -1,6 +1,7 @@
 package common_test
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -28,7 +29,7 @@ func TestBrokerPublish(t *testing.T) {
 	t.Parallel()
 
 	broker := common.NewBroker(new(config.Config))
-	err := broker.Publish(&tasks.Signature{})
+	err := broker.Publish(context.Background(), &tasks.Signature{})
 	assert.EqualError(t, err, "Not implemented")
 }
 
@@ -36,7 +37,7 @@ func TestGetPendingTasks(t *testing.T) {
 	t.Parallel()
 
 	broker := common.NewBroker(new(config.Config))
-	pendingTasks, err := broker.GetPendingTasks("queue")
+	pendingTasks, err := broker.GetPendingTasks(context.Background(), "queue")
 	assert.Nil(t, pendingTasks)
 	assert.EqualError(t, err, "Not implemented")
 }
@@ -45,7 +46,7 @@ func TestGetPendingTaskCount(t *testing.T) {
 	t.Parallel()
 
 	broker := common.NewBroker(new(config.Config))
-	count, err := broker.GetPendingTaskCount("queue")
+	count, err := broker.GetPendingTaskCount(context.Background(), "queue")
 	assert.Equal(t, int64(0), count)
 	assert.EqualError(t, err, "Not implemented")
 }
@@ -54,7 +55,7 @@ func TestGetDelayedTasks(t *testing.T) {
 	t.Parallel()
 
 	broker := common.NewBroker(new(config.Config))
-	delayedTasks, err := broker.GetDelayedTasks()
+	delayedTasks, err := broker.GetDelayedTasks(context.Background())
 	assert.Nil(t, delayedTasks)
 	assert.EqualError(t, err, "Not implemented")
 }
@@ -63,7 +64,7 @@ func TestCancelDelayedTask(t *testing.T) {
 	t.Parallel()
 
 	broker := common.NewBroker(new(config.Config))
-	err := broker.CancelDelayedTask("task-uuid")
+	err := broker.CancelDelayedTask(context.Background(), "task-uuid")
 	assert.EqualError(t, err, "Not implemented")
 }
 

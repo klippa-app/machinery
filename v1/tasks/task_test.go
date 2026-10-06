@@ -21,7 +21,7 @@ func TestTaskCallErrorTest(t *testing.T) {
 	// Create test task that returns tasks.ErrRetryTaskLater error
 	retriable := func() error { return tasks.NewErrRetryTaskLater("some error", 4*time.Hour) }
 
-	task, err := tasks.New(retriable, []tasks.Arg{})
+	task, err := tasks.New(context.Background(), retriable, []tasks.Arg{})
 	assert.NoError(t, err)
 
 	// Invoke TryCall and validate that returned error can be cast to tasks.ErrRetryTaskLater
@@ -34,7 +34,7 @@ func TestTaskCallErrorTest(t *testing.T) {
 	// Create test task that returns a standard error
 	standard := func() error { return errors.New("some error") }
 
-	task, err = tasks.New(standard, []tasks.Arg{})
+	task, err = tasks.New(context.Background(), standard, []tasks.Arg{})
 	assert.NoError(t, err)
 
 	// Invoke TryCall and validate that returned error is standard
@@ -72,7 +72,7 @@ func TestTaskCallInvalidArgRobustnessError(t *testing.T) {
 		{Type: "bool", Value: true},
 	}
 
-	task, err := tasks.New(f, args)
+	task, err := tasks.New(context.Background(), f, args)
 	assert.NoError(t, err)
 
 	// Invoke TryCall and validate error handling
@@ -87,7 +87,7 @@ func TestTaskCallInterfaceValuedResult(t *testing.T) {
 	// Create a test task function
 	f := func() (interface{}, error) { return math.Pi, nil }
 
-	task, err := tasks.New(f, []tasks.Arg{})
+	task, err := tasks.New(context.Background(), f, []tasks.Arg{})
 	assert.NoError(t, err)
 
 	taskResults, err := task.Call()
@@ -104,7 +104,7 @@ func TestTaskCallWithContext(t *testing.T) {
 		assert.Nil(t, tasks.SignatureFromContext(c))
 		return math.Pi, nil
 	}
-	task, err := tasks.New(f, []tasks.Arg{})
+	task, err := tasks.New(context.Background(), f, []tasks.Arg{})
 	assert.NoError(t, err)
 	taskResults, err := task.Call()
 	assert.NoError(t, err)
@@ -124,7 +124,7 @@ func TestTaskCallWithSignatureInContext(t *testing.T) {
 	}
 	signature, err := tasks.NewSignature("foo", []tasks.Arg{})
 	assert.NoError(t, err)
-	task, err := tasks.NewWithSignature(f, signature)
+	task, err := tasks.NewWithSignature(context.Background(), f, signature)
 	assert.NoError(t, err)
 	taskResults, err := task.Call()
 	assert.NoError(t, err)
@@ -144,7 +144,7 @@ func TestNewReflectArgsError(t *testing.T) {
 	f := func() error { return nil }
 	badArgs := []tasks.Arg{{Type: "notarealtype", Value: "x"}}
 
-	_, err := tasks.New(f, badArgs)
+	_, err := tasks.New(context.Background(), f, badArgs)
 	assert.Error(t, err)
 }
 
@@ -157,7 +157,7 @@ func TestNewWithSignatureReflectArgsError(t *testing.T) {
 		Args: []tasks.Arg{{Type: "notarealtype", Value: "x"}},
 	}
 
-	_, err := tasks.NewWithSignature(f, signature)
+	_, err := tasks.NewWithSignature(context.Background(), f, signature)
 	assert.Error(t, err)
 }
 
@@ -175,7 +175,7 @@ func TestTaskCallNoReturnValue(t *testing.T) {
 	t.Parallel()
 
 	f := func() {}
-	task, err := tasks.New(f, []tasks.Arg{})
+	task, err := tasks.New(context.Background(), f, []tasks.Arg{})
 	assert.NoError(t, err)
 
 	results, err := task.Call()
@@ -189,7 +189,7 @@ func TestTaskCallRetriableResult(t *testing.T) {
 	f := func() tasks.Retriable {
 		return tasks.NewErrRetryTaskLater("some error", time.Hour)
 	}
-	task, err := tasks.New(f, []tasks.Arg{})
+	task, err := tasks.New(context.Background(), f, []tasks.Arg{})
 	assert.NoError(t, err)
 
 	results, err := task.Call()
@@ -208,7 +208,7 @@ func TestTaskCallLastReturnValueNotError(t *testing.T) {
 	t.Parallel()
 
 	f := func() fmt.Stringer { return stringerResult{} }
-	task, err := tasks.New(f, []tasks.Arg{})
+	task, err := tasks.New(context.Background(), f, []tasks.Arg{})
 	assert.NoError(t, err)
 
 	results, err := task.Call()
@@ -220,7 +220,7 @@ func TestTaskCallPanicWithNonErrorNonStringValue(t *testing.T) {
 	t.Parallel()
 
 	f := func() error { panic(42) }
-	task, err := tasks.New(f, []tasks.Arg{})
+	task, err := tasks.New(context.Background(), f, []tasks.Arg{})
 	assert.NoError(t, err)
 
 	results, err := task.Call()
@@ -232,7 +232,7 @@ func TestTaskCallPanicWithErrorValue(t *testing.T) {
 	t.Parallel()
 
 	f := func() error { panic(errors.New("boom")) }
-	task, err := tasks.New(f, []tasks.Arg{})
+	task, err := tasks.New(context.Background(), f, []tasks.Arg{})
 	assert.NoError(t, err)
 
 	results, err := task.Call()
@@ -248,7 +248,7 @@ func TestTaskCallWithTracingSpan(t *testing.T) {
 	ctx := opentracing.ContextWithSpan(context.Background(), span)
 
 	f := func() error { return nil }
-	task, err := tasks.New(f, []tasks.Arg{})
+	task, err := tasks.New(context.Background(), f, []tasks.Arg{})
 	assert.NoError(t, err)
 	task.Context = ctx
 
@@ -265,7 +265,7 @@ func TestTaskCallPanicWithTracingSpan(t *testing.T) {
 	ctx := opentracing.ContextWithSpan(context.Background(), span)
 
 	f := func() error { panic("boom") }
-	task, err := tasks.New(f, []tasks.Arg{})
+	task, err := tasks.New(context.Background(), f, []tasks.Arg{})
 	assert.NoError(t, err)
 	task.Context = ctx
 

@@ -246,7 +246,7 @@ func TestSendTaskSuccess(t *testing.T) {
 	asyncResult, err := server.SendTask(sig)
 	require.NoError(t, err)
 
-	results, err := asyncResult.Get(time.Millisecond)
+	results, err := asyncResult.Get(context.Background(), time.Millisecond)
 	require.NoError(t, err)
 	require.Len(t, results, 1)
 	assert.Equal(t, int64(3), results[0].Interface())
@@ -332,7 +332,7 @@ func TestSendTaskUnregistered(t *testing.T) {
 	asyncResult, err := server.SendTask(sig)
 	require.NoError(t, err)
 
-	state := asyncResult.GetState()
+	state := asyncResult.GetState(context.Background())
 	assert.Equal(t, tasks.StatePending, state.State)
 }
 
@@ -380,7 +380,7 @@ func TestSendChainSuccess(t *testing.T) {
 	chainAsyncResult, err := server.SendChain(chain)
 	require.NoError(t, err)
 
-	results, err := chainAsyncResult.Get(time.Millisecond)
+	results, err := chainAsyncResult.Get(context.Background(), time.Millisecond)
 	require.NoError(t, err)
 	require.Len(t, results, 1)
 	assert.Equal(t, int64(13), results[0].Interface())
@@ -453,11 +453,11 @@ func TestSendGroupSuccess(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, asyncResults, 2)
 
-	results1, err := asyncResults[0].Get(time.Millisecond)
+	results1, err := asyncResults[0].Get(context.Background(), time.Millisecond)
 	require.NoError(t, err)
 	assert.Equal(t, int64(3), results1[0].Interface())
 
-	results2, err := asyncResults[1].Get(time.Millisecond)
+	results2, err := asyncResults[1].Get(context.Background(), time.Millisecond)
 	require.NoError(t, err)
 	assert.Equal(t, int64(7), results2[0].Interface())
 }
@@ -491,7 +491,7 @@ func TestSendGroupWithConcurrencyLimit(t *testing.T) {
 	require.Len(t, asyncResults, 5)
 
 	for i, ar := range asyncResults {
-		results, err := ar.Get(time.Millisecond)
+		results, err := ar.Get(context.Background(), time.Millisecond)
 		require.NoError(t, err)
 		assert.Equal(t, int64(i+1), results[0].Interface())
 	}
@@ -620,7 +620,7 @@ func TestSendChordSuccess(t *testing.T) {
 	chordAsyncResult, err := server.SendChord(chord, 1)
 	require.NoError(t, err)
 
-	results, err := chordAsyncResult.Get(time.Millisecond)
+	results, err := chordAsyncResult.Get(context.Background(), time.Millisecond)
 	require.NoError(t, err)
 	require.Len(t, results, 1)
 	assert.Equal(t, int64(10), results[0].Interface())
@@ -921,7 +921,7 @@ func TestNewServerEagerAutoAssignsWorker(t *testing.T) {
 	asyncResult, err := server.SendTask(sig)
 	require.NoError(t, err)
 
-	state := asyncResult.GetState()
+	state := asyncResult.GetState(context.Background())
 	assert.Equal(t, tasks.StateSuccess, state.State)
 }
 

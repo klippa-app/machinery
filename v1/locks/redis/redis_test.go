@@ -48,7 +48,7 @@ func TestNew_AddressParsingWithoutPassword(t *testing.T) {
 	lock := redis.New(new(config.Config), []string{redisURL}, 0, 1)
 	key := uniqueKey(t)
 
-	err := lock.LockWithRetries(key, time.Now().Add(time.Minute).UnixNano())
+	err := lock.LockWithRetries(context.Background(), key, time.Now().Add(time.Minute).UnixNano())
 	assert.NoError(t, err)
 
 	client := rawClient(redisURL)
@@ -69,7 +69,7 @@ func TestNew_AddressParsingWithPassword(t *testing.T) {
 
 	key := uniqueKey(t)
 	// Expect this to fail (wrong auth), but it must not panic.
-	_ = lock.LockWithRetries(key, time.Now().Add(time.Minute).UnixNano())
+	_ = lock.LockWithRetries(context.Background(), key, time.Now().Add(time.Minute).UnixNano())
 }
 
 func TestLock_SuccessOnNewKey(t *testing.T) {
@@ -81,7 +81,7 @@ func TestLock_SuccessOnNewKey(t *testing.T) {
 	key := uniqueKey(t)
 	defer client.Del(ctxBg(), key)
 
-	err := lock.Lock(key, time.Now().Add(time.Minute).UnixNano())
+	err := lock.Lock(context.Background(), key, time.Now().Add(time.Minute).UnixNano())
 	assert.NoError(t, err)
 
 	v, err := client.Get(ctxBg(), key).Result()
@@ -99,9 +99,9 @@ func TestLock_HeldAndNotExpired(t *testing.T) {
 	defer client.Del(ctxBg(), key)
 
 	expire := time.Now().Add(time.Minute).UnixNano()
-	assert.NoError(t, lock.Lock(key, expire))
+	assert.NoError(t, lock.Lock(context.Background(), key, expire))
 
-	err := lock.Lock(key, time.Now().Add(2*time.Minute).UnixNano())
+	err := lock.Lock(context.Background(), key, time.Now().Add(2*time.Minute).UnixNano())
 	assert.Equal(t, redis.ErrRedisLockFailed, err)
 }
 
@@ -118,7 +118,7 @@ func TestLock_GetErrorOnWrongType(t *testing.T) {
 	// with WRONGTYPE.
 	assert.NoError(t, client.RPush(ctxBg(), key, "x").Err())
 
-	err := lock.Lock(key, time.Now().Add(time.Minute).UnixNano())
+	err := lock.Lock(context.Background(), key, time.Now().Add(time.Minute).UnixNano())
 	assert.Error(t, err)
 	assert.NotEqual(t, redis.ErrRedisLockFailed, err)
 }
@@ -134,7 +134,7 @@ func TestLock_AtoiErrorOnNonNumericValue(t *testing.T) {
 
 	assert.NoError(t, client.Set(ctxBg(), key, "not-a-number", time.Minute).Err())
 
-	err := lock.Lock(key, time.Now().Add(time.Minute).UnixNano())
+	err := lock.Lock(context.Background(), key, time.Now().Add(time.Minute).UnixNano())
 	assert.Error(t, err)
 	assert.NotEqual(t, redis.ErrRedisLockFailed, err)
 }
@@ -151,7 +151,7 @@ func TestLock_SetNXErrorOnPastExpiry(t *testing.T) {
 	// A unixTsToExpireNs far enough in the past makes the derived expiration
 	// duration negative, which Redis rejects with "invalid expire time",
 	// exercising the SETNX error branch.
-	err := lock.Lock(key, time.Now().Add(-time.Hour).UnixNano())
+	err := lock.Lock(context.Background(), key, time.Now().Add(-time.Hour).UnixNano())
 	assert.Error(t, err)
 	assert.NotEqual(t, redis.ErrRedisLockFailed, err)
 }
@@ -165,9 +165,9 @@ func TestLockWithRetries_ExhaustsRetriesAndFails(t *testing.T) {
 	key := uniqueKey(t)
 	defer client.Del(ctxBg(), key)
 
-	assert.NoError(t, lock.Lock(key, time.Now().Add(time.Minute).UnixNano()))
+	assert.NoError(t, lock.Lock(context.Background(), key, time.Now().Add(time.Minute).UnixNano()))
 
-	err := lock.LockWithRetries(key, time.Now().Add(2*time.Minute).UnixNano())
+	err := lock.LockWithRetries(context.Background(), key, time.Now().Add(2*time.Minute).UnixNano())
 	assert.Equal(t, redis.ErrRedisLockFailed, err)
 }
 
@@ -197,7 +197,7 @@ func TestLock_ExpiredContention(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			results <- lock.Lock(key, time.Now().Add(time.Hour).UnixNano())
+			results <- lock.Lock(context.Background(), key, time.Now().Add(time.Hour).UnixNano())
 		}()
 	}
 	wg.Wait()

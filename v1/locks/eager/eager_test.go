@@ -1,6 +1,7 @@
 package eager
 
 import (
+	"context"
 	lockiface "github.com/RichardKnop/machinery/v1/locks/iface"
 	"github.com/RichardKnop/machinery/v1/utils"
 	"github.com/stretchr/testify/assert"
@@ -13,11 +14,11 @@ func TestLock_Lock(t *testing.T) {
 	keyName := utils.GetPureUUID()
 
 	go func() {
-		err := lock.Lock(keyName, time.Now().Add(25*time.Second).UnixNano())
+		err := lock.Lock(context.Background(), keyName, time.Now().Add(25*time.Second).UnixNano())
 		assert.NoError(t, err)
 	}()
 	time.Sleep(1 * time.Second)
-	err := lock.Lock(keyName, time.Now().Add(25*time.Second).UnixNano())
+	err := lock.Lock(context.Background(), keyName, time.Now().Add(25*time.Second).UnixNano())
 	assert.Error(t, err)
 	assert.EqualError(t, err, ErrEagerLockFailed.Error())
 }
@@ -27,11 +28,11 @@ func TestLock_LockWithRetries(t *testing.T) {
 	keyName := utils.GetPureUUID()
 
 	go func() {
-		err := lock.LockWithRetries(keyName, time.Now().Add(25*time.Second).UnixNano())
+		err := lock.LockWithRetries(context.Background(), keyName, time.Now().Add(25*time.Second).UnixNano())
 		assert.NoError(t, err)
 	}()
 	time.Sleep(1 * time.Second)
-	err := lock.LockWithRetries(keyName, time.Now().Add(25*time.Second).UnixNano())
+	err := lock.LockWithRetries(context.Background(), keyName, time.Now().Add(25*time.Second).UnixNano())
 	assert.Error(t, err)
 	assert.EqualError(t, err, ErrEagerLockFailed.Error())
 }

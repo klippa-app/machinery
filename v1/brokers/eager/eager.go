@@ -59,7 +59,7 @@ func (eagerBroker *Broker) Publish(ctx context.Context, task *tasks.Signature) e
 	}
 
 	// blocking call to the task directly
-	return eagerBroker.worker.Process(signature)
+	return eagerBroker.worker.Process(ctx, signature)
 }
 
 // AssignWorker assigns a worker to the eager broker

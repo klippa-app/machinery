@@ -235,6 +235,9 @@ func (b *Broker) StartConsuming(consumerTag string, concurrency int, taskProcess
 					log.ERROR.Print(errs.NewErrCouldNotUnmarshalTaskSignature(task, err))
 				}
 
+				// Deliberately not pollCtx: this republish must still
+				// succeed even if it races with shutdown, otherwise the
+				// task would be lost rather than moved to the live queue.
 				if err := b.Publish(context.Background(), signature); err != nil {
 					log.ERROR.Print(err)
 				}
@@ -287,19 +290,19 @@ func (b *Broker) Publish(ctx context.Context, signature *tasks.Signature) error 
 
 		if signature.ETA.After(now) {
 			score := signature.ETA.UnixNano()
-			return b.client().ZAdd(context.Background(), b.redisDelayedTasksKey, redis.Z{Score: float64(score), Member: msg}).Err()
+			return b.client().ZAdd(ctx, b.redisDelayedTasksKey, redis.Z{Score: float64(score), Member: msg}).Err()
 		}
 	}
 
-	return b.client().RPush(context.Background(), signature.RoutingKey, msg).Err()
+	return b.client().RPush(ctx, signature.RoutingKey, msg).Err()
 }
 
 // GetPendingTasks returns a slice of task signatures waiting in the queue
-func (b *Broker) GetPendingTasks(queue string) ([]*tasks.Signature, error) {
+func (b *Broker) GetPendingTasks(ctx context.Context, queue string) ([]*tasks.Signature, error) {
 	if queue == "" {
 		queue = b.GetConfig().DefaultQueue
 	}
-	results, err := b.client().LRange(context.Background(), queue, 0, -1).Result()
+	results, err := b.client().LRange(ctx, queue, 0, -1).Result()
 	if err != nil {
 		return nil, err
 	}
@@ -308,17 +311,17 @@ func (b *Broker) GetPendingTasks(queue string) ([]*tasks.Signature, error) {
 }
 
 // GetPendingTaskCount returns the number of tasks waiting in the queue
-func (b *Broker) GetPendingTaskCount(queue string) (int64, error) {
+func (b *Broker) GetPendingTaskCount(ctx context.Context, queue string) (int64, error) {
 	if queue == "" {
 		queue = b.GetConfig().DefaultQueue
 	}
 
-	return b.client().LLen(context.Background(), queue).Result()
+	return b.client().LLen(ctx, queue).Result()
 }
 
 // GetDelayedTasks returns a slice of task signatures that are scheduled, but not yet in the queue
-func (b *Broker) GetDelayedTasks() ([]*tasks.Signature, error) {
-	results, err := b.client().ZRange(context.Background(), b.redisDelayedTasksKey, 0, -1).Result()
+func (b *Broker) GetDelayedTasks(ctx context.Context) ([]*tasks.Signature, error) {
+	results, err := b.client().ZRange(ctx, b.redisDelayedTasksKey, 0, -1).Result()
 	if err != nil {
 		return nil, err
 	}
@@ -327,8 +330,8 @@ func (b *Broker) GetDelayedTasks() ([]*tasks.Signature, error) {
 }
 
 // GetDelayedTask returns the delayed task matching the given UUID, if any
-func (b *Broker) GetDelayedTask(taskUUID string) (*tasks.Signature, error) {
-	delayedTasks, err := b.GetDelayedTasks()
+func (b *Broker) GetDelayedTask(ctx context.Context, taskUUID string) (*tasks.Signature, error) {
+	delayedTasks, err := b.GetDelayedTasks(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -344,8 +347,8 @@ func (b *Broker) GetDelayedTask(taskUUID string) (*tasks.Signature, error) {
 
 // CancelDelayedTask removes a delayed task matching the given UUID from the
 // delayed tasks set, preventing it from ever being published
-func (b *Broker) CancelDelayedTask(taskUUID string) error {
-	task, err := b.GetDelayedTask(taskUUID)
+func (b *Broker) CancelDelayedTask(ctx context.Context, taskUUID string) error {
+	task, err := b.GetDelayedTask(ctx, taskUUID)
 	if err != nil {
 		return err
 	}
@@ -355,7 +358,7 @@ func (b *Broker) CancelDelayedTask(taskUUID string) error {
 		return err
 	}
 
-	return b.client().ZRem(context.Background(), b.redisDelayedTasksKey, taskBytes).Err()
+	return b.client().ZRem(ctx, b.redisDelayedTasksKey, taskBytes).Err()
 }
 
 func decodeSignatures(results []string) ([]*tasks.Signature, error) {
@@ -450,7 +453,11 @@ func (b *Broker) consumeOne(delivery []byte, taskProcessor iface.TaskProcessor) 
 
 	log.DEBUG.Printf("Received new message: %s", delivery)
 
-	return taskProcessor.Process(signature)
+	// A fresh context per task, deliberately independent of pollCtx: once a
+	// task has been picked up, StopConsuming waits for it to finish rather
+	// than cancelling it mid-flight, so it must not be tied to the
+	// poll-cancellation context.
+	return taskProcessor.Process(context.Background(), signature)
 }
 
 // nextTask pops next available task from the default queue
@@ -548,5 +555,7 @@ func getQueue(config *config.Config, taskProcessor iface.TaskProcessor) string {
 }
 
 func (b *Broker) requeueMessage(delivery []byte, taskProcessor iface.TaskProcessor) {
+	// Deliberately context.Background(): this runs during shutdown, and the
+	// requeue must still complete so the task isn't lost.
 	b.client().RPush(context.Background(), getQueue(b.GetConfig(), taskProcessor), delivery)
 }

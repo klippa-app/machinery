@@ -59,7 +59,7 @@ type testTaskProcessor struct {
 	processed   chan *tasks.Signature
 }
 
-func (p *testTaskProcessor) Process(sig *tasks.Signature) error {
+func (p *testTaskProcessor) Process(ctx context.Context, sig *tasks.Signature) error {
 	if p.processed != nil {
 		p.processed <- sig
 	}

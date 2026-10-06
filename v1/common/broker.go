@@ -1,6 +1,7 @@
 package common
 
 import (
+	"context"
 	"errors"
 	"sync"
 	"sync/atomic"
@@ -65,7 +66,7 @@ func (b *Broker) GetStopChan() chan int {
 }
 
 // Publish places a new message on the default queue
-func (b *Broker) Publish(signature *tasks.Signature) error {
+func (b *Broker) Publish(ctx context.Context, signature *tasks.Signature) error {
 	return errors.New("Not implemented")
 }
 
@@ -89,22 +90,22 @@ func (b *Broker) IsTaskRegistered(name string) bool {
 }
 
 // GetPendingTasks returns a slice of task.Signatures waiting in the queue
-func (b *Broker) GetPendingTasks(queue string) ([]*tasks.Signature, error) {
+func (b *Broker) GetPendingTasks(ctx context.Context, queue string) ([]*tasks.Signature, error) {
 	return nil, errors.New("Not implemented")
 }
 
 // GetPendingTaskCount returns the number of tasks waiting in the queue
-func (b *Broker) GetPendingTaskCount(queue string) (int64, error) {
+func (b *Broker) GetPendingTaskCount(ctx context.Context, queue string) (int64, error) {
 	return 0, errors.New("Not implemented")
 }
 
 // GetDelayedTasks returns a slice of task.Signatures that are scheduled, but not yet in the queue
-func (b *Broker) GetDelayedTasks() ([]*tasks.Signature, error) {
+func (b *Broker) GetDelayedTasks(ctx context.Context) ([]*tasks.Signature, error) {
 	return nil, errors.New("Not implemented")
 }
 
 // CancelDelayedTask removes a scheduled task with given UUID, so that is not picked up by the queue later
-func (b *Broker) CancelDelayedTask(taskUUID string) error {
+func (b *Broker) CancelDelayedTask(ctx context.Context, taskUUID string) error {
 	return errors.New("Not implemented")
 }
 

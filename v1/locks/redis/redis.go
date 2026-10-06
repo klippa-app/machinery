@@ -37,9 +37,9 @@ func New(cnf *config.Config, addrs []string, db, retries int) Lock {
 	return lock
 }
 
-func (r Lock) LockWithRetries(key string, unixTsToExpireNs int64) error {
+func (r Lock) LockWithRetries(ctx context.Context, key string, unixTsToExpireNs int64) error {
 	for i := 0; i <= r.retries; i++ {
-		err := r.Lock(key, unixTsToExpireNs)
+		err := r.Lock(ctx, key, unixTsToExpireNs)
 		if err == nil {
 			//成功拿到锁，返回
 			return nil
@@ -50,11 +50,9 @@ func (r Lock) LockWithRetries(key string, unixTsToExpireNs int64) error {
 	return ErrRedisLockFailed
 }
 
-func (r Lock) Lock(key string, unixTsToExpireNs int64) error {
+func (r Lock) Lock(ctx context.Context, key string, unixTsToExpireNs int64) error {
 	now := time.Now().UnixNano()
 	expiration := time.Duration(unixTsToExpireNs + 1 - now)
-	// ctx := r.rclient.Context()
-	ctx := context.Background()
 
 	success, err := r.rclient.SetNX(ctx, key, unixTsToExpireNs, expiration).Result()
 	if err != nil {

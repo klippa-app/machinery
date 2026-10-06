@@ -16,7 +16,7 @@ type fakeProcessor struct {
 	customQueue string
 }
 
-func (p *fakeProcessor) Process(sig *tasks.Signature) error {
+func (p *fakeProcessor) Process(ctx context.Context, sig *tasks.Signature) error {
 	if p.processFunc != nil {
 		return p.processFunc(sig)
 	}
