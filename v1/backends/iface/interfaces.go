@@ -22,7 +22,6 @@ type Backend interface {
 	GetState(taskUUID string) (*tasks.TaskState, error)
 
 	// Purging stored stored tasks states and group meta data
-	IsAMQP() bool
 	PurgeState(taskUUID string) error
 	PurgeGroupMeta(groupUUID string) error
 }

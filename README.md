@@ -17,7 +17,6 @@ Machinery is an asynchronous task queue/job queue based on distributed message p
 
 ---
 
-* [V2 Experiment](#v2-experiment)
 * [First Steps](#first-steps)
 * [Configuration](#configuration)
   * [Lock](#lock)
@@ -25,10 +24,7 @@ Machinery is an asynchronous task queue/job queue based on distributed message p
   * [DefaultQueue](#defaultqueue)
   * [ResultBackend](#resultbackend)
   * [ResultsExpireIn](#resultsexpirein)
-  * [AMQP](#amqp-2)
-  * [DynamoDB](#dynamodb)
   * [Redis](#redis-2)
-  * [GCPPubSub](#gcppubsub)
 * [Custom Logger](#custom-logger)
 * [Server](#server)
 * [Workers](#workers)
@@ -55,64 +51,26 @@ Machinery is an asynchronous task queue/job queue based on distributed message p
   * [Dependencies](#dependencies)
   * [Testing](#testing)
 
-### V2
-
-I recommend using V2 in order to avoid having to import all dependencies for brokers and backends you are not using.
-
-Instead of factory, you will need to inject broker and backend objects to the server constructor:
-
-```go
-import (
-  "github.com/RichardKnop/machinery/v2"
-  backendsiface "github.com/RichardKnop/machinery/v2/backends/iface"
-  brokersiface "github.com/RichardKnop/machinery/v2/brokers/iface"
-  locksiface "github.com/RichardKnop/machinery/v2/locks/iface"
-)
-
-var broker brokersiface.Broker
-var backend backendsiface.Backend
-var lock locksiface.Lock
-server := machinery.NewServer(cnf, broker, backend, lock)
-// server.NewWorker("machinery", 10)
-```
-
 ### First Steps
-
-To install recommended v2 release:
-
-```sh
-go get github.com/RichardKnop/machinery/v2
-```
-
-If you want to use legacy v1 version, you still can:
 
 ```sh
 go get github.com/RichardKnop/machinery
 ```
 
-First, you will need to define some tasks. Look at sample tasks in `v2/example/tasks/tasks.go` to see a few examples.
+First, you will need to define some tasks. Look at sample tasks in `example/tasks/tasks.go` to see a few examples.
 
-Second, you will need to launch a worker process with one of these commands (v2 is recommended since it doesn't import dependencies for all brokers / backends, only those you actually need):
+Second, you will need to launch a worker process:
 
 ```sh
-cd v2/
-go run example/amqp/main.go worker
-go run example/redigo/main.go worker // Redis with redigo driver
-go run example/go-redis/main.go worker // Redis with Go Redis driver
-
-go run example/amqp/main.go worker
 go run example/redis/main.go worker
 ```
 
 ![Example worker][1]
 
-Finally, once you have a worker running and waiting for tasks to consume, send some tasks with one of these commands (v2 is recommended since it doesn't import dependencies for all brokers / backends, only those you actually need):
+Finally, once you have a worker running and waiting for tasks to consume, send some tasks:
 
 ```sh
-cd v2
-go run v2/example/amqp/main.go send
-go run v2/example/redigo/main.go send // Redis with redigo driver
-go run v2/example/go-redis/main.go send // Redis with Go Redis driver
+go run example/redis/main.go send
 ```
 
 You will be able to see the tasks being processed asynchronously by the worker:
@@ -121,7 +79,7 @@ You will be able to see the tasks being processed asynchronously by the worker:
 
 ### Configuration
 
-The [config](/v2/config/config.go) package has convenience methods for loading configuration from environment variables or a YAML file. For example, load configuration from environment variables:
+The [config](/v1/config/config.go) package has convenience methods for loading configuration from environment variables or a YAML file. For example, load configuration from environment variables:
 
 ```go
 cnf, err := config.NewFromEnvironment()
@@ -153,21 +111,7 @@ For example:
 
 #### Broker
 
-A message broker. Currently supported brokers are:
-
-##### AMQP
-
-Use AMQP URL in the format:
-
-```
-amqp://[username:password@]@host[:port]
-```
-
-For example:
-
-1. `amqp://guest:guest@localhost:5672`
-
-AMQP also supports multiples brokers urls. You need to specify the URL separator in the `MultipleBrokerSeparator` field.
+A message broker. This fork only supports Redis as the broker (AMQP, AWS SQS and GCP Pub/Sub broker support were removed to keep the maintained surface small).
 
 ##### Redis
 
@@ -183,80 +127,13 @@ For example:
 1. `redis://localhost:6379`, or with password `redis://password@localhost:6379`
 2. `redis+socket://password@/path/to/file.sock:/0`
 
-##### AWS SQS
-
-Use AWS SQS URL in the format:
-
-```
-https://sqs.us-east-2.amazonaws.com/123456789012
-```
-
-See [AWS SQS docs](https://docs.aws.amazon.com/sdk-for-go/v1/developer-guide/configuring-sdk.html) for more information.
-Also, configuring `AWS_REGION` is required, or an error would be thrown.
-
-To use a manually configured SQS Client:
-
-```go
-var sqsClient = sqs.New(session.Must(session.NewSession(&aws.Config{
-  Region:         aws.String("YOUR_AWS_REGION"),
-  Credentials:    credentials.NewStaticCredentials("YOUR_AWS_ACCESS_KEY", "YOUR_AWS_ACCESS_SECRET", ""),
-  HTTPClient:     &http.Client{
-    Timeout: time.Second * 120,
-  },
-})))
-var visibilityTimeout = 20
-var cnf = &config.Config{
-  Broker:          "YOUR_SQS_URL"
-  DefaultQueue:    "machinery_tasks",
-  ResultBackend:   "YOUR_BACKEND_URL",
-  SQS: &config.SQSConfig{
-    Client: sqsClient,
-    // if VisibilityTimeout is nil default to the overall visibility timeout setting for the queue
-    // https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/sqs-visibility-timeout.html
-    VisibilityTimeout: &visibilityTimeout,
-    WaitTimeSeconds: 30,
-  },
-}
-```
-
-##### GCP Pub/Sub
-
-Use GCP Pub/Sub URL in the format:
-
-```
-gcppubsub://YOUR_GCP_PROJECT_ID/YOUR_PUBSUB_SUBSCRIPTION_NAME
-```
-
-To use a manually configured Pub/Sub Client:
-
-```go
-pubsubClient, err := pubsub.NewClient(
-    context.Background(),
-    "YOUR_GCP_PROJECT_ID",
-    option.WithServiceAccountFile("YOUR_GCP_SERVICE_ACCOUNT_FILE"),
-)
-
-cnf := &config.Config{
-  Broker:          "gcppubsub://YOUR_GCP_PROJECT_ID/YOUR_PUBSUB_SUBSCRIPTION_NAME"
-  DefaultQueue:    "YOUR_PUBSUB_TOPIC_NAME",
-  ResultBackend:   "YOUR_BACKEND_URL",
-  GCPPubSub: config.GCPPubSubConfig{
-    Client: pubsubClient,
-  },
-}
-```
-
 #### DefaultQueue
 
 Default queue name, e.g. `machinery_tasks`.
 
 #### ResultBackend
 
-Result backend to use for keeping task states and results.
-
-Currently supported backends are:
-
-##### Redis
+Result backend to use for keeping task states and results. In this fork, Redis is the only supported result backend (AMQP, Memcache, MongoDB and DynamoDB backend support were removed to keep the maintained surface small).
 
 Use Redis URL in one of these formats:
 
@@ -272,88 +149,13 @@ For example:
 3. cluster/sentinel `redis://host1:port1,host2:port2,host3:port3/0`
 4. cluster/sentinel with password `redis://pass@host1:port1,host2:port2,host3:port3/0`
 
-##### Memcache
-
-Use Memcache URL in the format:
-
-```
-memcache://host1[:port1][,host2[:port2],...[,hostN[:portN]]]
-```
-
-For example:
-
-1. `memcache://localhost:11211` for a single instance, or
-2. `memcache://10.0.0.1:11211,10.0.0.2:11211` for a cluster
-
-##### AMQP
-
-Use AMQP URL in the format:
-
-```
-amqp://[username:password@]@host[:port]
-```
-
-For example:
-
-1. `amqp://guest:guest@localhost:5672`
-
-> Keep in mind AMQP is not recommended as a result backend. See [Keeping Results](https://github.com/RichardKnop/machinery#keeping-results)
-
-##### MongoDB
-
-Use Mongodb URL in the format:
-
-```
-mongodb://[username:password@]host1[:port1][,host2[:port2],...[,hostN[:portN]]][/[database][?options]]
-```
-
-For example:
-
-1. `mongodb://localhost:27017/taskresults`
-
-See [MongoDB docs](https://docs.mongodb.org/manual/reference/connection-string/) for more information.
-
-
 #### ResultsExpireIn
 
 How long to store task results for in seconds. Defaults to `3600` (1 hour).
 
-#### AMQP
-
-RabbitMQ related configuration. Not necessary if you are using other broker/backend.
-
-* `Exchange`: exchange name, e.g. `machinery_exchange`
-* `ExchangeType`: exchange type, e.g. `direct`
-* `QueueBindingArguments`: an optional map of additional arguments used when binding to an AMQP queue
-* `BindingKey`: The queue is bind to the exchange with this key, e.g. `machinery_task`
-* `PrefetchCount`: How many tasks to prefetch (set to `1` if you have long running tasks)
-* `DelayedQueue`: delayed queue name to be used for task retry or delayed task (if empty it will follow auto create and delate delayed queues)
-
-#### DynamoDB
-
-DynamoDB related configuration. Not necessary if you are using other backend.
-* `TaskStatesTable`: Custom table name for saving task states. Default one is `task_states`, and make sure to create this table in your AWS admin first, using `TaskUUID` as table's primary key.
-* `GroupMetasTable`: Custom table name for saving group metas. Default one is `group_metas`, and make sure to create this table in your AWS admin first, using `GroupUUID` as table's primary key.
-For example:
-
-```
-dynamodb:
-  task_states_table: 'task_states'
-  group_metas_table: 'group_metas'
-```
-If these tables are not found, an fatal error would be thrown.
-
-If you wish to expire the records, you can configure the `TTL` field in AWS admin for these tables. The `TTL` field is set based on the `ResultsExpireIn` value in the Server's config. See https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/howitworks-ttl.html for more information.
-
 #### Redis
 
 Redis related configuration. Not necessary if you are using other backend.
-
-See: [config](/v1/config/config.go) (TODO)
-
-#### GCPPubSub
-
-GCPPubSub related configuration. Not necessary if you are using other backend.
 
 See: [config](/v1/config/config.go) (TODO)
 
@@ -394,14 +196,9 @@ import (
 )
 
 var cnf = &config.Config{
-  Broker:        "amqp://guest:guest@localhost:5672/",
+  Broker:        "redis://localhost:6379",
   DefaultQueue:  "machinery_tasks",
-  ResultBackend: "amqp://guest:guest@localhost:5672/",
-  AMQP: &config.AMQPConfig{
-    Exchange:     "machinery_exchange",
-    ExchangeType: "direct",
-    BindingKey:   "machinery_task",
-  },
+  ResultBackend: "redis://localhost:6379",
 }
 
 server, err := machinery.NewServer(cnf)
@@ -564,7 +361,7 @@ type Signature struct {
 
 `Args` is a list of arguments that will be passed to the task when it is executed by a worker.
 
-`Headers` is a list of headers that will be used when publishing the task to AMQP queue.
+`Headers` is a list of headers that will be used when publishing the task.
 
 `Immutable` is a flag which defines whether a result of the executed task can be modified or not. This is important with `OnSuccess` callbacks. Immutable task will not pass its result to its success callbacks while a mutable task will prepend its result to args sent to callback tasks. Long story short, set Immutable to false if you want to pass result of the first task in a chain to the second task.
 
@@ -696,8 +493,6 @@ const (
 	StateFailure = "FAILURE"
 )
 ```
-
-> When using AMQP as a result backend, task states will be persisted in separate queues for each task. Although RabbitMQ can scale up to thousands of queues, it is strongly advised to use a better suited result backend (e.g. Memcache) when you are expecting to run a large number of parallel tasks.
 
 ```go
 // TaskResult represents an actual return value of a processed task
@@ -1176,28 +971,19 @@ if err != nil {
 #### Requirements
 
 * Go
-* RabbitMQ (optional)
 * Redis
-* Memcached (optional)
-* MongoDB (optional)
 
 On OS X systems, you can install requirements using [Homebrew](http://brew.sh/):
 
 ```sh
 brew install go
-brew install rabbitmq
 brew install redis
-brew install memcached
-brew install mongodb
 ```
 
 Or optionally use the corresponding [Docker](http://docker.io/) containers:
 
 ```
-docker run -d -p 5672:5672 rabbitmq
 docker run -d -p 6379:6379 redis
-docker run -d -p 11211:11211 memcached
-docker run -d -p 27017:27017 mongo
 docker run -d -p 6831:6831/udp -p 16686:16686 jaegertracing/all-in-one:latest
 ```
 
@@ -1223,22 +1009,10 @@ This will basically run docker-compose command:
 
 Alternative approach is to setup a development environment on your machine.
 
-In order to enable integration tests, you will need to install all required services (RabbitMQ, Redis, Memcache, MongoDB) and export these environment variables:
+In order to enable integration tests, you will need to install Redis and export this environment variable:
 
 ```sh
-export AMQP_URL=amqp://guest:guest@localhost:5672/
 export REDIS_URL=localhost:6379
-export MEMCACHE_URL=localhost:11211
-export MONGODB_URL=localhost:27017
-```
-
-To run integration tests against an SQS instance, you will need to create a "test_queue" in SQS and export these environment variables:
-
-```sh
-export SQS_URL=https://YOUR_SQS_URL
-export AWS_ACCESS_KEY_ID=YOUR_AWS_ACCESS_KEY_ID
-export AWS_SECRET_ACCESS_KEY=YOUR_AWS_SECRET_ACCESS_KEY
-export AWS_DEFAULT_REGION=YOUR_AWS_DEFAULT_REGION
 ```
 
 Then just run:

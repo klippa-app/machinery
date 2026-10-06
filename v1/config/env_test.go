@@ -37,10 +37,11 @@ func TestNewFromEnvironment(t *testing.T) {
 	assert.Equal(t, "default_queue", cnf.DefaultQueue)
 	assert.Equal(t, "result_backend", cnf.ResultBackend)
 	assert.Equal(t, 123456, cnf.ResultsExpireIn)
-	assert.Equal(t, "exchange", cnf.AMQP.Exchange)
-	assert.Equal(t, "exchange_type", cnf.AMQP.ExchangeType)
-	assert.Equal(t, "binding_key", cnf.AMQP.BindingKey)
-	assert.Equal(t, "any", cnf.AMQP.QueueBindingArgs["x-match"])
-	assert.Equal(t, "png", cnf.AMQP.QueueBindingArgs["image-type"])
-	assert.Equal(t, 123, cnf.AMQP.PrefetchCount)
+}
+
+func TestNewFromEnvironment_Error(t *testing.T) {
+	t.Setenv("RESULTS_EXPIRE_IN", "not-a-number")
+
+	_, err := config.NewFromEnvironment()
+	assert.Error(t, err)
 }

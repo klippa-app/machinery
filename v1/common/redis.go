@@ -1,92 +1,88 @@
 package common
 
 import (
-	"crypto/tls"
+	"context"
+	"net"
+	"strings"
 	"time"
 
-	"github.com/gomodule/redigo/redis"
+	"github.com/redis/go-redis/v9"
 
 	"github.com/RichardKnop/machinery/v1/config"
 )
 
-var (
-	defaultConfig = &config.RedisConfig{
-		MaxIdle:                10,
-		MaxActive:              100,
-		IdleTimeout:            300,
-		Wait:                   true,
-		ReadTimeout:            15,
-		WriteTimeout:           15,
-		ConnectTimeout:         15,
-		NormalTasksPollPeriod:  1000,
-		DelayedTasksPollPeriod: 20,
-	}
-)
-
-// RedisConnector ...
-type RedisConnector struct{}
-
-// NewPool returns a new pool of Redis connections
-func (rc *RedisConnector) NewPool(socketPath, host, username, password string, db int, cnf *config.RedisConfig, tlsConfig *tls.Config) *redis.Pool {
-	if cnf == nil {
-		cnf = defaultConfig
-	}
-	return &redis.Pool{
-		MaxIdle:     cnf.MaxIdle,
-		IdleTimeout: time.Duration(cnf.IdleTimeout) * time.Second,
-		MaxActive:   cnf.MaxActive,
-		Wait:        cnf.Wait,
-		Dial: func() (redis.Conn, error) {
-			c, err := rc.open(socketPath, host, username, password, db, cnf, tlsConfig)
-			if err != nil {
-				return nil, err
+// NewUniversalOptions builds go-redis UniversalOptions from a list of
+// addresses and the library's Redis/TLS configuration, so brokers, backends
+// and locks all configure their Redis client identically.
+//
+// addrs follows the same convention as a redis:// URL with multiple hosts:
+// the first entry may have "user:pass@" or "pass@" prepended to it, e.g.
+// "pass@host1:port1", "host2:port2". When socketPath is non-empty, it takes
+// precedence over addrs and a Unix socket connection is used instead.
+func NewUniversalOptions(cnf *config.Config, addrs []string, db int, socketPath string) *redis.UniversalOptions {
+	var username, password string
+	if len(addrs) > 0 {
+		parts := strings.Split(addrs[0], "@")
+		if len(parts) >= 2 {
+			options := strings.SplitN(strings.Join(parts[:len(parts)-1], "@"), ":", 2)
+			if len(options) >= 2 {
+				username = options[0]
+				password = options[1]
+			} else {
+				password = options[0]
 			}
-
-			if db != 0 {
-				_, err = c.Do("SELECT", db)
-				if err != nil {
-					return nil, err
-				}
-			}
-
-			return c, err
-		},
-		// PINGs connections that have been idle more than 10 seconds
-		TestOnBorrow: func(c redis.Conn, t time.Time) error {
-			if time.Since(t) < time.Duration(10*time.Second) {
-				return nil
-			}
-			_, err := c.Do("PING")
-			return err
-		},
-	}
-}
-
-// Open a new Redis connection
-func (rc *RedisConnector) open(socketPath, host, username string, password string, db int, cnf *config.RedisConfig, tlsConfig *tls.Config) (redis.Conn, error) {
-	var opts = []redis.DialOption{
-		redis.DialDatabase(db),
-		redis.DialReadTimeout(time.Duration(cnf.ReadTimeout) * time.Second),
-		redis.DialWriteTimeout(time.Duration(cnf.WriteTimeout) * time.Second),
-		redis.DialConnectTimeout(time.Duration(cnf.ConnectTimeout) * time.Second),
-		redis.DialClientName(cnf.ClientName),
+			addrs[0] = parts[len(parts)-1]
+		}
 	}
 
-	if tlsConfig != nil {
-		opts = append(opts, redis.DialTLSConfig(tlsConfig), redis.DialUseTLS(true))
+	ropt := &redis.UniversalOptions{
+		Addrs:     addrs,
+		DB:        db,
+		Username:  username,
+		Password:  password,
+		TLSConfig: cnf.TLSConfig,
 	}
 
-	if username != "" {
-		opts = append(opts, redis.DialUsername(username))
-	}
-
-	if password != "" {
-		opts = append(opts, redis.DialPassword(password))
+	if cnf.Redis != nil {
+		r := cnf.Redis
+		ropt.MasterName = r.MasterName
+		ropt.ClientName = r.ClientName
+		if r.MaxIdle > 0 {
+			ropt.MaxIdleConns = r.MaxIdle
+		}
+		if r.MaxActive > 0 {
+			ropt.PoolSize = r.MaxActive
+		}
+		if r.IdleTimeout > 0 {
+			ropt.ConnMaxIdleTime = time.Duration(r.IdleTimeout) * time.Second
+		}
+		if r.ReadTimeout > 0 {
+			ropt.ReadTimeout = time.Duration(r.ReadTimeout) * time.Second
+		}
+		if r.WriteTimeout > 0 {
+			ropt.WriteTimeout = time.Duration(r.WriteTimeout) * time.Second
+		}
+		if r.ConnectTimeout > 0 {
+			ropt.DialTimeout = time.Duration(r.ConnectTimeout) * time.Second
+		}
 	}
 
 	if socketPath != "" {
-		return redis.Dial("unix", socketPath, opts...)
+		ropt.Addrs = []string{socketPath}
+		ropt.Dialer = func(ctx context.Context, network, addr string) (net.Conn, error) {
+			var d net.Dialer
+			return d.DialContext(ctx, "unix", socketPath)
+		}
 	}
 
-	return redis.Dial("tcp", host, opts...)
+	return ropt
+}
+
+// NewUniversalClient builds a go-redis client from the given options,
+// returning a cluster client when ClusterMode is enabled.
+func NewUniversalClient(cnf *config.Config, ropt *redis.UniversalOptions) redis.UniversalClient {
+	if cnf.Redis != nil && cnf.Redis.ClusterMode {
+		return redis.NewClusterClient(ropt.Cluster())
+	}
+	return redis.NewUniversalClient(ropt)
 }

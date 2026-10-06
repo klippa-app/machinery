@@ -3,6 +3,7 @@ package common
 import (
 	"errors"
 	"sync"
+	"sync/atomic"
 
 	"github.com/RichardKnop/machinery/v1/brokers/iface"
 	"github.com/RichardKnop/machinery/v1/config"
@@ -20,17 +21,19 @@ type registeredTaskNames struct {
 type Broker struct {
 	cnf                 *config.Config
 	registeredTaskNames registeredTaskNames
-	retry               bool
-	retryFunc           func(chan int)
-	retryStopChan       chan int
-	stopChan            chan int
+	// retryDisabled tracks the inverse of "should retry" so its zero value
+	// (false, i.e. retry enabled) matches the desired initial state without
+	// needing to mutate a freshly-constructed Broker before returning it.
+	retryDisabled atomic.Bool
+	retryFunc     func(chan int)
+	retryStopChan chan int
+	stopChan      chan int
 }
 
 // NewBroker creates new Broker instance
 func NewBroker(cnf *config.Config) Broker {
 	return Broker{
 		cnf:           cnf,
-		retry:         true,
 		stopChan:      make(chan int),
 		retryStopChan: make(chan int),
 	}
@@ -43,7 +46,7 @@ func (b *Broker) GetConfig() *config.Config {
 
 // GetRetry ...
 func (b *Broker) GetRetry() bool {
-	return b.retry
+	return !b.retryDisabled.Load()
 }
 
 // GetRetryFunc ...
@@ -116,7 +119,7 @@ func (b *Broker) StartConsuming(consumerTag string, concurrency int, taskProcess
 // StopConsuming is a common part of StopConsuming
 func (b *Broker) StopConsuming() {
 	// Do not retry from now on
-	b.retry = false
+	b.retryDisabled.Store(true)
 	// Stop the retry closure earlier
 	select {
 	case b.retryStopChan <- 1:

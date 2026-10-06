@@ -3,9 +3,13 @@ package tasks_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math"
 	"testing"
 	"time"
+
+	opentracing "github.com/opentracing/opentracing-go"
+	"github.com/opentracing/opentracing-go/mocktracer"
 
 	"github.com/RichardKnop/machinery/v1/tasks"
 	"github.com/stretchr/testify/assert"
@@ -126,4 +130,146 @@ func TestTaskCallWithSignatureInContext(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, "float64", taskResults[0].Type)
 	assert.Equal(t, math.Pi, taskResults[0].Value)
+}
+
+func TestSignatureFromContextNilContext(t *testing.T) {
+	t.Parallel()
+
+	assert.Nil(t, tasks.SignatureFromContext(nil))
+}
+
+func TestNewReflectArgsError(t *testing.T) {
+	t.Parallel()
+
+	f := func() error { return nil }
+	badArgs := []tasks.Arg{{Type: "notarealtype", Value: "x"}}
+
+	_, err := tasks.New(f, badArgs)
+	assert.Error(t, err)
+}
+
+func TestNewWithSignatureReflectArgsError(t *testing.T) {
+	t.Parallel()
+
+	f := func() error { return nil }
+	signature := &tasks.Signature{
+		Name: "foo",
+		Args: []tasks.Arg{{Type: "notarealtype", Value: "x"}},
+	}
+
+	_, err := tasks.NewWithSignature(f, signature)
+	assert.Error(t, err)
+}
+
+func TestTaskReflectArgsError(t *testing.T) {
+	t.Parallel()
+
+	task := new(tasks.Task)
+	badArgs := []tasks.Arg{{Type: "notarealtype", Value: "x"}}
+
+	err := task.ReflectArgs(badArgs)
+	assert.Error(t, err)
+}
+
+func TestTaskCallNoReturnValue(t *testing.T) {
+	t.Parallel()
+
+	f := func() {}
+	task, err := tasks.New(f, []tasks.Arg{})
+	assert.NoError(t, err)
+
+	results, err := task.Call()
+	assert.Nil(t, results)
+	assert.Equal(t, tasks.ErrTaskReturnsNoValue, err)
+}
+
+func TestTaskCallRetriableResult(t *testing.T) {
+	t.Parallel()
+
+	f := func() tasks.Retriable {
+		return tasks.NewErrRetryTaskLater("some error", time.Hour)
+	}
+	task, err := tasks.New(f, []tasks.Arg{})
+	assert.NoError(t, err)
+
+	results, err := task.Call()
+	assert.Nil(t, results)
+
+	retriable, ok := err.(tasks.ErrRetryTaskLater)
+	assert.True(t, ok, "Error should be castable to tasks.ErrRetryTaskLater")
+	assert.Equal(t, time.Hour, retriable.RetryIn())
+}
+
+type stringerResult struct{}
+
+func (stringerResult) String() string { return "foo" }
+
+func TestTaskCallLastReturnValueNotError(t *testing.T) {
+	t.Parallel()
+
+	f := func() fmt.Stringer { return stringerResult{} }
+	task, err := tasks.New(f, []tasks.Arg{})
+	assert.NoError(t, err)
+
+	results, err := task.Call()
+	assert.Nil(t, results)
+	assert.Equal(t, tasks.ErrLastReturnValueMustBeError, err)
+}
+
+func TestTaskCallPanicWithNonErrorNonStringValue(t *testing.T) {
+	t.Parallel()
+
+	f := func() error { panic(42) }
+	task, err := tasks.New(f, []tasks.Arg{})
+	assert.NoError(t, err)
+
+	results, err := task.Call()
+	assert.Nil(t, results)
+	assert.Equal(t, tasks.ErrTaskPanicked, err)
+}
+
+func TestTaskCallPanicWithErrorValue(t *testing.T) {
+	t.Parallel()
+
+	f := func() error { panic(errors.New("boom")) }
+	task, err := tasks.New(f, []tasks.Arg{})
+	assert.NoError(t, err)
+
+	results, err := task.Call()
+	assert.Nil(t, results)
+	assert.EqualError(t, err, "boom")
+}
+
+func TestTaskCallWithTracingSpan(t *testing.T) {
+	t.Parallel()
+
+	tracer := mocktracer.New()
+	span := tracer.StartSpan("test")
+	ctx := opentracing.ContextWithSpan(context.Background(), span)
+
+	f := func() error { return nil }
+	task, err := tasks.New(f, []tasks.Arg{})
+	assert.NoError(t, err)
+	task.Context = ctx
+
+	results, err := task.Call()
+	assert.NoError(t, err)
+	assert.NotNil(t, results)
+}
+
+func TestTaskCallPanicWithTracingSpan(t *testing.T) {
+	t.Parallel()
+
+	tracer := mocktracer.New()
+	span := tracer.StartSpan("test")
+	ctx := opentracing.ContextWithSpan(context.Background(), span)
+
+	f := func() error { panic("boom") }
+	task, err := tasks.New(f, []tasks.Arg{})
+	assert.NoError(t, err)
+	task.Context = ctx
+
+	results, err := task.Call()
+	assert.Nil(t, results)
+	assert.EqualError(t, err, "boom")
 }

@@ -12,7 +12,6 @@ import (
 
 	"github.com/opentracing/opentracing-go"
 
-	"github.com/RichardKnop/machinery/v1/backends/amqp"
 	"github.com/RichardKnop/machinery/v1/brokers/errs"
 	"github.com/RichardKnop/machinery/v1/log"
 	"github.com/RichardKnop/machinery/v1/retry"
@@ -64,13 +63,6 @@ func (worker *Worker) LaunchAsync(errorsChan chan<- error) {
 		log.INFO.Printf("- CustomQueue: %s", worker.Queue)
 	}
 	log.INFO.Printf("- ResultBackend: %s", RedactURL(cnf.ResultBackend))
-	if cnf.AMQP != nil {
-		log.INFO.Printf("- AMQP: %s", cnf.AMQP.Exchange)
-		log.INFO.Printf("  - Exchange: %s", cnf.AMQP.Exchange)
-		log.INFO.Printf("  - ExchangeType: %s", cnf.AMQP.ExchangeType)
-		log.INFO.Printf("  - BindingKey: %s", cnf.AMQP.BindingKey)
-		log.INFO.Printf("  - PrefetchCount: %d", cnf.AMQP.PrefetchCount)
-	}
 
 	var signalWG sync.WaitGroup
 	// Goroutine to start broker consumption and handle retries when broker connection dies
@@ -312,10 +304,6 @@ func (worker *Worker) taskSucceeded(signature *tasks.Signature, taskResults []*t
 		return nil
 	}
 
-	// Defer purging of group meta queue if we are using AMQP backend
-	if worker.hasAMQPBackend() {
-		defer worker.server.GetBackend().PurgeGroupMeta(signature.GroupUUID)
-	}
 
 	// Trigger chord callback
 	shouldTrigger, err := worker.server.GetBackend().TriggerChord(signature.GroupUUID)
@@ -398,12 +386,6 @@ func (worker *Worker) taskFailed(signature *tasks.Signature, taskErr error) erro
 	}
 
 	return nil
-}
-
-// Returns true if the worker uses AMQP backend
-func (worker *Worker) hasAMQPBackend() bool {
-	_, ok := worker.server.GetBackend().(*amqp.Backend)
-	return ok
 }
 
 // SetErrorHandler sets a custom error handler for task errors

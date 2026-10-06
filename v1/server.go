@@ -53,6 +53,14 @@ func NewServerWithBrokerBackendLock(cnf *config.Config, brokerServer brokersifac
 	return srv
 }
 
+// Stop gracefully stops the periodic task scheduler, waiting for any
+// in-flight RegisterPeriodicTask/Chain/Group/Chord job to finish and
+// preventing it (or any other registered periodic job) from firing again.
+// It is a no-op to call it more than once.
+func (server *Server) Stop() {
+	<-server.scheduler.Stop().Done()
+}
+
 // NewServer creates Server instance
 func NewServer(cnf *config.Config) (*Server, error) {
 	broker, err := BrokerFactory(cnf)

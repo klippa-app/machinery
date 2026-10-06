@@ -3,7 +3,6 @@ package machinery
 import (
 	"errors"
 	"fmt"
-	"os"
 	"strconv"
 	"strings"
 
@@ -11,19 +10,12 @@ import (
 
 	"github.com/RichardKnop/machinery/v1/config"
 
-	amqpbroker "github.com/RichardKnop/machinery/v1/brokers/amqp"
 	eagerbroker "github.com/RichardKnop/machinery/v1/brokers/eager"
-	gcppubsubbroker "github.com/RichardKnop/machinery/v1/brokers/gcppubsub"
 	brokeriface "github.com/RichardKnop/machinery/v1/brokers/iface"
 	redisbroker "github.com/RichardKnop/machinery/v1/brokers/redis"
-	sqsbroker "github.com/RichardKnop/machinery/v1/brokers/sqs"
 
-	amqpbackend "github.com/RichardKnop/machinery/v1/backends/amqp"
-	dynamobackend "github.com/RichardKnop/machinery/v1/backends/dynamodb"
 	eagerbackend "github.com/RichardKnop/machinery/v1/backends/eager"
 	backendiface "github.com/RichardKnop/machinery/v1/backends/iface"
-	memcachebackend "github.com/RichardKnop/machinery/v1/backends/memcache"
-	mongobackend "github.com/RichardKnop/machinery/v1/backends/mongo"
 	nullbackend "github.com/RichardKnop/machinery/v1/backends/null"
 	redisbackend "github.com/RichardKnop/machinery/v1/backends/redis"
 
@@ -33,16 +25,8 @@ import (
 )
 
 // BrokerFactory creates a new object of iface.Broker
-// Currently only AMQP/S broker is supported
+// Currently only the Redis broker is supported
 func BrokerFactory(cnf *config.Config) (brokeriface.Broker, error) {
-	if strings.HasPrefix(cnf.Broker, "amqp://") {
-		return amqpbroker.New(cnf), nil
-	}
-
-	if strings.HasPrefix(cnf.Broker, "amqps://") {
-		return amqpbroker.New(cnf), nil
-	}
-
 	if strings.HasPrefix(cnf.Broker, "redis://") || strings.HasPrefix(cnf.Broker, "rediss://") {
 		var scheme string
 		if strings.HasPrefix(cnf.Broker, "redis://") {
@@ -60,13 +44,14 @@ func BrokerFactory(cnf *config.Config) (brokeriface.Broker, error) {
 		brokers := strings.Split(parts[1], ",")
 		if len(brokers) > 1 || (cnf.Redis != nil && cnf.Redis.ClusterMode) {
 			db, brokers := ParseBrokers(brokers)
-			return redisbroker.NewGR(cnf, brokers, db), nil
+			return redisbroker.New(cnf, brokers, db, ""), nil
 		} else {
 			redisHost, redisUsername, redisPassword, redisDB, err := ParseRedisURL(cnf.Broker)
 			if err != nil {
 				return nil, err
 			}
-			return redisbroker.New(cnf, redisHost, redisUsername, redisPassword, "", redisDB), nil
+			addr := buildRedisAddr(redisUsername, redisPassword, redisHost)
+			return redisbroker.New(cnf, []string{addr}, redisDB, ""), nil
 		}
 	}
 
@@ -76,61 +61,20 @@ func BrokerFactory(cnf *config.Config) (brokeriface.Broker, error) {
 			return nil, err
 		}
 
-		return redisbroker.New(cnf, "", redisUsername, redisPassword, redisSocket, redisDB), nil
+		addr := buildRedisAddr(redisUsername, redisPassword, "")
+		return redisbroker.New(cnf, []string{addr}, redisDB, redisSocket), nil
 	}
 
 	if strings.HasPrefix(cnf.Broker, "eager") {
 		return eagerbroker.New(), nil
 	}
 
-	if _, ok := os.LookupEnv("DISABLE_STRICT_SQS_CHECK"); ok {
-		//disable SQS name check, so that users can use this with local simulated SQS
-		//where sql broker url might not start with https://sqs
-
-		//even when disabling strict SQS naming check, make sure its still a valid http URL
-		if strings.HasPrefix(cnf.Broker, "https://") || strings.HasPrefix(cnf.Broker, "http://") {
-			return sqsbroker.New(cnf), nil
-		}
-	} else {
-		if strings.HasPrefix(cnf.Broker, "https://sqs") {
-			return sqsbroker.New(cnf), nil
-		}
-	}
-
-	if strings.HasPrefix(cnf.Broker, "gcppubsub://") {
-		projectID, subscriptionName, err := ParseGCPPubSubURL(cnf.Broker)
-		if err != nil {
-			return nil, err
-		}
-		return gcppubsubbroker.New(cnf, projectID, subscriptionName)
-	}
-
 	return nil, fmt.Errorf("Factory failed with broker URL: %v", cnf.Broker)
 }
 
 // BackendFactory creates a new object of backends.Interface
-// Currently supported backends are AMQP/S and Memcache
+// Currently supported backends are Redis, eager (in-memory) and null (discard results)
 func BackendFactory(cnf *config.Config) (backendiface.Backend, error) {
-
-	if strings.HasPrefix(cnf.ResultBackend, "amqp://") {
-		return amqpbackend.New(cnf), nil
-	}
-
-	if strings.HasPrefix(cnf.ResultBackend, "amqps://") {
-		return amqpbackend.New(cnf), nil
-	}
-
-	if strings.HasPrefix(cnf.ResultBackend, "memcache://") {
-		parts := strings.Split(cnf.ResultBackend, "memcache://")
-		if len(parts) != 2 {
-			return nil, fmt.Errorf(
-				"Memcache result backend connection string should be in format memcache://server1:port,server2:port, instead got %s",
-				cnf.ResultBackend,
-			)
-		}
-		servers := strings.Split(parts[1], ",")
-		return memcachebackend.New(cnf, servers), nil
-	}
 
 	if strings.HasPrefix(cnf.ResultBackend, "redis://") || strings.HasPrefix(cnf.ResultBackend, "rediss://") {
 		var scheme string
@@ -143,7 +87,7 @@ func BackendFactory(cnf *config.Config) (backendiface.Backend, error) {
 		addrs := strings.Split(parts[1], ",")
 		if len(addrs) > 1 || (cnf.Redis != nil && cnf.Redis.ClusterMode) {
 			db, addrs := ParseBrokers(addrs)
-			return redisbackend.NewGR(cnf, addrs, db), nil
+			return redisbackend.New(cnf, addrs, db, ""), nil
 		} else {
 			redisHost, redisUsername, redisPassword, redisDB, err := ParseRedisURL(cnf.ResultBackend)
 
@@ -151,7 +95,8 @@ func BackendFactory(cnf *config.Config) (backendiface.Backend, error) {
 				return nil, err
 			}
 
-			return redisbackend.New(cnf, redisHost, redisUsername, redisPassword, "", redisDB), nil
+			addr := buildRedisAddr(redisUsername, redisPassword, redisHost)
+			return redisbackend.New(cnf, []string{addr}, redisDB, ""), nil
 		}
 	}
 
@@ -161,12 +106,8 @@ func BackendFactory(cnf *config.Config) (backendiface.Backend, error) {
 			return nil, err
 		}
 
-		return redisbackend.New(cnf, "", redisUsername, redisPassword, redisSocket, redisDB), nil
-	}
-
-	if strings.HasPrefix(cnf.ResultBackend, "mongodb://") ||
-		strings.HasPrefix(cnf.ResultBackend, "mongodb+srv://") {
-		return mongobackend.New(cnf)
+		addr := buildRedisAddr(redisUsername, redisPassword, "")
+		return redisbackend.New(cnf, []string{addr}, redisDB, redisSocket), nil
 	}
 
 	if strings.HasPrefix(cnf.ResultBackend, "eager") {
@@ -177,11 +118,20 @@ func BackendFactory(cnf *config.Config) (backendiface.Backend, error) {
 		return nullbackend.New(), nil
 	}
 
-	if strings.HasPrefix(cnf.ResultBackend, "https://dynamodb") {
-		return dynamobackend.New(cnf), nil
-	}
-
 	return nil, fmt.Errorf("Factory failed with result backend: %v", cnf.ResultBackend)
+}
+
+// buildRedisAddr encodes a username/password pair into the "user:pass@host"
+// (or "pass@host") convention expected by common.NewUniversalOptions.
+func buildRedisAddr(username, password, host string) string {
+	switch {
+	case username != "":
+		return username + ":" + password + "@" + host
+	case password != "":
+		return password + "@" + host
+	default:
+		return host
+	}
 }
 
 // ParseRedisURL ...
@@ -315,32 +265,4 @@ func ParseRedisSocketURL(url string) (path, username, password string, db int, e
 	}
 
 	return
-}
-
-// ParseGCPPubSubURL Parse GCP Pub/Sub URL
-// url: gcppubsub://YOUR_GCP_PROJECT_ID/YOUR_PUBSUB_SUBSCRIPTION_NAME
-func ParseGCPPubSubURL(url string) (string, string, error) {
-	parts := strings.Split(url, "gcppubsub://")
-	if parts[0] != "" {
-		return "", "", errors.New("No gcppubsub scheme found")
-	}
-
-	if len(parts) != 2 {
-		return "", "", fmt.Errorf("gcppubsub scheme should be in format gcppubsub://YOUR_GCP_PROJECT_ID/YOUR_PUBSUB_SUBSCRIPTION_NAME, instead got %s", url)
-	}
-
-	remainder := parts[1]
-
-	parts = strings.Split(remainder, "/")
-	if len(parts) == 2 {
-		if parts[0] == "" {
-			return "", "", fmt.Errorf("gcppubsub scheme should be in format gcppubsub://YOUR_GCP_PROJECT_ID/YOUR_PUBSUB_SUBSCRIPTION_NAME, instead got %s", url)
-		}
-		if parts[1] == "" {
-			return "", "", fmt.Errorf("gcppubsub scheme should be in format gcppubsub://YOUR_GCP_PROJECT_ID/YOUR_PUBSUB_SUBSCRIPTION_NAME, instead got %s", url)
-		}
-		return parts[0], parts[1], nil
-	}
-
-	return "", "", fmt.Errorf("gcppubsub scheme should be in format gcppubsub://YOUR_GCP_PROJECT_ID/YOUR_PUBSUB_SUBSCRIPTION_NAME, instead got %s", url)
 }

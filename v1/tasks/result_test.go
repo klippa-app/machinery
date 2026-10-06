@@ -1,6 +1,7 @@
 package tasks_test
 
 import (
+	"reflect"
 	"testing"
 
 	"github.com/RichardKnop/machinery/v1/tasks"
@@ -24,4 +25,35 @@ func TestReflectTaskResults(t *testing.T) {
 		assert.Equal(t, "o", results[0].Index(1).String())
 		assert.Equal(t, "o", results[0].Index(2).String())
 	}
+}
+
+func TestReflectTaskResultsError(t *testing.T) {
+	t.Parallel()
+
+	taskResults := []*tasks.TaskResult{
+		{
+			Type:  "notarealtype",
+			Value: "foo",
+		},
+	}
+
+	results, err := tasks.ReflectTaskResults(taskResults)
+	assert.Error(t, err)
+	assert.Nil(t, results)
+}
+
+func TestHumanReadableResultsSingle(t *testing.T) {
+	t.Parallel()
+
+	results := []reflect.Value{reflect.ValueOf(42)}
+
+	assert.Equal(t, "42", tasks.HumanReadableResults(results))
+}
+
+func TestHumanReadableResultsMultiple(t *testing.T) {
+	t.Parallel()
+
+	results := []reflect.Value{reflect.ValueOf(42), reflect.ValueOf("foo")}
+
+	assert.Equal(t, "[42, foo]", tasks.HumanReadableResults(results))
 }

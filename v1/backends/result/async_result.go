@@ -78,11 +78,6 @@ func (asyncResult *AsyncResult) Touch() ([]reflect.Value, error) {
 
 	asyncResult.GetState()
 
-	// Purge state if we are using AMQP backend
-	if asyncResult.backend.IsAMQP() && asyncResult.taskState.IsCompleted() {
-		asyncResult.backend.PurgeState(asyncResult.taskState.TaskUUID)
-	}
-
 	if asyncResult.taskState.IsFailure() {
 		return nil, errors.New(asyncResult.taskState.Error)
 	}
