@@ -2,6 +2,7 @@ package eager
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"sync"
@@ -45,9 +46,10 @@ func (e ErrTasknotFound) Error() string {
 // Backend represents an "eager" in-memory result backend
 type Backend struct {
 	common.Backend
-	groups     map[string][]string
-	tasks      map[string][]byte
-	stateMutex sync.Mutex
+	groupsMutex sync.RWMutex
+	groups      map[string][]string
+	tasksMutex  sync.RWMutex
+	tasks       map[string][]byte
 }
 
 // New creates EagerBackend instance
@@ -60,25 +62,29 @@ func New() iface.Backend {
 }
 
 // InitGroup creates and saves a group meta data object
-func (b *Backend) InitGroup(groupUUID string, taskUUIDs []string) error {
-	tasks := make([]string, 0, len(taskUUIDs))
+func (b *Backend) InitGroup(ctx context.Context, groupUUID string, taskUUIDs []string) error {
+	taskUUIDsCopy := make([]string, 0, len(taskUUIDs))
 	// copy every task
-	tasks = append(tasks, taskUUIDs...)
+	taskUUIDsCopy = append(taskUUIDsCopy, taskUUIDs...)
 
-	b.groups[groupUUID] = tasks
+	b.groupsMutex.Lock()
+	b.groups[groupUUID] = taskUUIDsCopy
+	b.groupsMutex.Unlock()
 	return nil
 }
 
 // GroupCompleted returns true if all tasks in a group finished
-func (b *Backend) GroupCompleted(groupUUID string, groupTaskCount int) (bool, error) {
-	tasks, ok := b.groups[groupUUID]
+func (b *Backend) GroupCompleted(ctx context.Context, groupUUID string, groupTaskCount int) (bool, error) {
+	b.groupsMutex.RLock()
+	taskUUIDs, ok := b.groups[groupUUID]
+	b.groupsMutex.RUnlock()
 	if !ok {
 		return false, NewErrGroupNotFound(groupUUID)
 	}
 
 	var countSuccessTasks = 0
-	for _, v := range tasks {
-		t, err := b.GetState(v)
+	for _, v := range taskUUIDs {
+		t, err := b.GetState(ctx, v)
 		if err != nil {
 			return false, err
 		}
@@ -92,15 +98,17 @@ func (b *Backend) GroupCompleted(groupUUID string, groupTaskCount int) (bool, er
 }
 
 // GroupTaskStates returns states of all tasks in the group
-func (b *Backend) GroupTaskStates(groupUUID string, groupTaskCount int) ([]*tasks.TaskState, error) {
+func (b *Backend) GroupTaskStates(ctx context.Context, groupUUID string, groupTaskCount int) ([]*tasks.TaskState, error) {
+	b.groupsMutex.RLock()
 	taskUUIDs, ok := b.groups[groupUUID]
+	b.groupsMutex.RUnlock()
 	if !ok {
 		return nil, NewErrGroupNotFound(groupUUID)
 	}
 
 	ret := make([]*tasks.TaskState, 0, groupTaskCount)
 	for _, taskUUID := range taskUUIDs {
-		t, err := b.GetState(taskUUID)
+		t, err := b.GetState(ctx, taskUUID)
 		if err != nil {
 			return nil, err
 		}
@@ -115,49 +123,51 @@ func (b *Backend) GroupTaskStates(groupUUID string, groupTaskCount int) ([]*task
 // chord is never trigerred multiple times. Returns a boolean flag to indicate
 // whether the worker should trigger chord (true) or no if it has been triggered
 // already (false)
-func (b *Backend) TriggerChord(groupUUID string) (bool, error) {
+func (b *Backend) TriggerChord(ctx context.Context, groupUUID string) (bool, error) {
 	return true, nil
 }
 
 // SetStatePending updates task state to PENDING
-func (b *Backend) SetStatePending(signature *tasks.Signature) error {
+func (b *Backend) SetStatePending(ctx context.Context, signature *tasks.Signature) error {
 	state := tasks.NewPendingTaskState(signature)
 	return b.updateState(state)
 }
 
 // SetStateReceived updates task state to RECEIVED
-func (b *Backend) SetStateReceived(signature *tasks.Signature) error {
+func (b *Backend) SetStateReceived(ctx context.Context, signature *tasks.Signature) error {
 	state := tasks.NewReceivedTaskState(signature)
 	return b.updateState(state)
 }
 
 // SetStateStarted updates task state to STARTED
-func (b *Backend) SetStateStarted(signature *tasks.Signature) error {
+func (b *Backend) SetStateStarted(ctx context.Context, signature *tasks.Signature) error {
 	state := tasks.NewStartedTaskState(signature)
 	return b.updateState(state)
 }
 
 // SetStateRetry updates task state to RETRY
-func (b *Backend) SetStateRetry(signature *tasks.Signature) error {
+func (b *Backend) SetStateRetry(ctx context.Context, signature *tasks.Signature) error {
 	state := tasks.NewRetryTaskState(signature)
 	return b.updateState(state)
 }
 
 // SetStateSuccess updates task state to SUCCESS
-func (b *Backend) SetStateSuccess(signature *tasks.Signature, results []*tasks.TaskResult) error {
+func (b *Backend) SetStateSuccess(ctx context.Context, signature *tasks.Signature, results []*tasks.TaskResult) error {
 	state := tasks.NewSuccessTaskState(signature, results)
 	return b.updateState(state)
 }
 
 // SetStateFailure updates task state to FAILURE
-func (b *Backend) SetStateFailure(signature *tasks.Signature, err string) error {
+func (b *Backend) SetStateFailure(ctx context.Context, signature *tasks.Signature, err string) error {
 	state := tasks.NewFailureTaskState(signature, err)
 	return b.updateState(state)
 }
 
 // GetState returns the latest task state
-func (b *Backend) GetState(taskUUID string) (*tasks.TaskState, error) {
+func (b *Backend) GetState(ctx context.Context, taskUUID string) (*tasks.TaskState, error) {
+	b.tasksMutex.RLock()
 	tasktStateBytes, ok := b.tasks[taskUUID]
+	b.tasksMutex.RUnlock()
 	if !ok {
 		return nil, NewErrTasknotFound(taskUUID)
 	}
@@ -173,7 +183,10 @@ func (b *Backend) GetState(taskUUID string) (*tasks.TaskState, error) {
 }
 
 // PurgeState deletes stored task state
-func (b *Backend) PurgeState(taskUUID string) error {
+func (b *Backend) PurgeState(ctx context.Context, taskUUID string) error {
+	b.tasksMutex.Lock()
+	defer b.tasksMutex.Unlock()
+
 	_, ok := b.tasks[taskUUID]
 	if !ok {
 		return NewErrTasknotFound(taskUUID)
@@ -184,7 +197,10 @@ func (b *Backend) PurgeState(taskUUID string) error {
 }
 
 // PurgeGroupMeta deletes stored group meta data
-func (b *Backend) PurgeGroupMeta(groupUUID string) error {
+func (b *Backend) PurgeGroupMeta(ctx context.Context, groupUUID string) error {
+	b.groupsMutex.Lock()
+	defer b.groupsMutex.Unlock()
+
 	_, ok := b.groups[groupUUID]
 	if !ok {
 		return NewErrGroupNotFound(groupUUID)
@@ -196,13 +212,13 @@ func (b *Backend) PurgeGroupMeta(groupUUID string) error {
 
 func (b *Backend) updateState(s *tasks.TaskState) error {
 	// simulate the behavior of json marshal/unmarshal
-	b.stateMutex.Lock()
-	defer b.stateMutex.Unlock()
 	msg, err := json.Marshal(s)
 	if err != nil {
 		return fmt.Errorf("Marshal task state error: %v", err)
 	}
 
+	b.tasksMutex.Lock()
 	b.tasks[s.TaskUUID] = msg
+	b.tasksMutex.Unlock()
 	return nil
 }

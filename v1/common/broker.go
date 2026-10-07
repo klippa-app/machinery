@@ -1,8 +1,10 @@
 package common
 
 import (
+	"context"
 	"errors"
 	"sync"
+	"sync/atomic"
 
 	"github.com/RichardKnop/machinery/v1/brokers/iface"
 	"github.com/RichardKnop/machinery/v1/config"
@@ -20,17 +22,19 @@ type registeredTaskNames struct {
 type Broker struct {
 	cnf                 *config.Config
 	registeredTaskNames registeredTaskNames
-	retry               bool
-	retryFunc           func(chan int)
-	retryStopChan       chan int
-	stopChan            chan int
+	// retryDisabled tracks the inverse of "should retry" so its zero value
+	// (false, i.e. retry enabled) matches the desired initial state without
+	// needing to mutate a freshly-constructed Broker before returning it.
+	retryDisabled atomic.Bool
+	retryFunc     func(chan int)
+	retryStopChan chan int
+	stopChan      chan int
 }
 
 // NewBroker creates new Broker instance
 func NewBroker(cnf *config.Config) Broker {
 	return Broker{
 		cnf:           cnf,
-		retry:         true,
 		stopChan:      make(chan int),
 		retryStopChan: make(chan int),
 	}
@@ -43,7 +47,7 @@ func (b *Broker) GetConfig() *config.Config {
 
 // GetRetry ...
 func (b *Broker) GetRetry() bool {
-	return b.retry
+	return !b.retryDisabled.Load()
 }
 
 // GetRetryFunc ...
@@ -62,7 +66,7 @@ func (b *Broker) GetStopChan() chan int {
 }
 
 // Publish places a new message on the default queue
-func (b *Broker) Publish(signature *tasks.Signature) error {
+func (b *Broker) Publish(ctx context.Context, signature *tasks.Signature) error {
 	return errors.New("Not implemented")
 }
 
@@ -86,22 +90,22 @@ func (b *Broker) IsTaskRegistered(name string) bool {
 }
 
 // GetPendingTasks returns a slice of task.Signatures waiting in the queue
-func (b *Broker) GetPendingTasks(queue string) ([]*tasks.Signature, error) {
+func (b *Broker) GetPendingTasks(ctx context.Context, queue string) ([]*tasks.Signature, error) {
 	return nil, errors.New("Not implemented")
 }
 
 // GetPendingTaskCount returns the number of tasks waiting in the queue
-func (b *Broker) GetPendingTaskCount(queue string) (int64, error) {
+func (b *Broker) GetPendingTaskCount(ctx context.Context, queue string) (int64, error) {
 	return 0, errors.New("Not implemented")
 }
 
 // GetDelayedTasks returns a slice of task.Signatures that are scheduled, but not yet in the queue
-func (b *Broker) GetDelayedTasks() ([]*tasks.Signature, error) {
+func (b *Broker) GetDelayedTasks(ctx context.Context) ([]*tasks.Signature, error) {
 	return nil, errors.New("Not implemented")
 }
 
 // CancelDelayedTask removes a scheduled task with given UUID, so that is not picked up by the queue later
-func (b *Broker) CancelDelayedTask(taskUUID string) error {
+func (b *Broker) CancelDelayedTask(ctx context.Context, taskUUID string) error {
 	return errors.New("Not implemented")
 }
 
@@ -116,7 +120,7 @@ func (b *Broker) StartConsuming(consumerTag string, concurrency int, taskProcess
 // StopConsuming is a common part of StopConsuming
 func (b *Broker) StopConsuming() {
 	// Do not retry from now on
-	b.retry = false
+	b.retryDisabled.Store(true)
 	// Stop the retry closure earlier
 	select {
 	case b.retryStopChan <- 1:

@@ -1,11 +1,14 @@
 package tasks_test
 
 import (
+	"context"
+	"encoding/base64"
 	"encoding/json"
 	"reflect"
 	"testing"
 
 	"github.com/RichardKnop/machinery/v1/tasks"
+	"github.com/stretchr/testify/assert"
 )
 
 var (
@@ -246,4 +249,158 @@ func TestReflectValue(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestReflectValueUnsupportedType(t *testing.T) {
+	t.Parallel()
+
+	_, err := tasks.ReflectValue("notarealtype", "foo")
+	assert.Error(t, err)
+	assert.Equal(t, "notarealtype is not one of supported types", err.Error())
+
+	unsupportedErr := tasks.NewErrUnsupportedType("notarealtype")
+	assert.Equal(t, "notarealtype is not one of supported types", unsupportedErr.Error())
+}
+
+func TestReflectValuesUnsupportedType(t *testing.T) {
+	t.Parallel()
+
+	_, err := tasks.ReflectValue("[]notarealtype", "foo")
+	assert.Error(t, err)
+	assert.Equal(t, "[]notarealtype is not one of supported types", err.Error())
+}
+
+func TestReflectValueBoolConversionError(t *testing.T) {
+	t.Parallel()
+
+	_, err := tasks.ReflectValue("bool", "not-a-bool")
+	assert.Error(t, err)
+	assert.Equal(t, "not-a-bool is not bool", err.Error())
+}
+
+func TestReflectValueIntConversion(t *testing.T) {
+	t.Parallel()
+
+	value, err := tasks.ReflectValue("int", int64(42))
+	assert.NoError(t, err)
+	assert.Equal(t, int(42), value.Interface())
+
+	_, err = tasks.ReflectValue("int", "not-an-int")
+	assert.Error(t, err)
+	assert.Equal(t, "not-an-int is not int", err.Error())
+
+	_, err = tasks.ReflectValue("int", json.Number("not-a-number"))
+	assert.Error(t, err)
+}
+
+func TestReflectValueUintConversion(t *testing.T) {
+	t.Parallel()
+
+	value, err := tasks.ReflectValue("uint", uint64(42))
+	assert.NoError(t, err)
+	assert.Equal(t, uint(42), value.Interface())
+
+	value, err = tasks.ReflectValue("uint", uint8(7))
+	assert.NoError(t, err)
+	assert.Equal(t, uint(7), value.Interface())
+
+	_, err = tasks.ReflectValue("uint", "not-a-uint")
+	assert.Error(t, err)
+	assert.Equal(t, "not-a-uint is not uint", err.Error())
+
+	_, err = tasks.ReflectValue("uint", json.Number("not-a-number"))
+	assert.Error(t, err)
+}
+
+func TestReflectValueFloatConversion(t *testing.T) {
+	t.Parallel()
+
+	value, err := tasks.ReflectValue("float64", float64(1.5))
+	assert.NoError(t, err)
+	assert.Equal(t, float64(1.5), value.Interface())
+
+	_, err = tasks.ReflectValue("float64", "not-a-float")
+	assert.Error(t, err)
+	assert.Equal(t, "not-a-float is not float64", err.Error())
+
+	_, err = tasks.ReflectValue("float64", json.Number("not-a-number"))
+	assert.Error(t, err)
+}
+
+func TestReflectValueStringConversionError(t *testing.T) {
+	t.Parallel()
+
+	_, err := tasks.ReflectValue("string", 123)
+	assert.Error(t, err)
+	assert.Equal(t, "123 is not string", err.Error())
+}
+
+func TestReflectValuesBoolElementError(t *testing.T) {
+	t.Parallel()
+
+	_, err := tasks.ReflectValue("[]bool", []interface{}{true, "not-a-bool"})
+	assert.Error(t, err)
+}
+
+func TestReflectValuesIntElementError(t *testing.T) {
+	t.Parallel()
+
+	_, err := tasks.ReflectValue("[]int", []interface{}{json.Number("1"), "not-an-int"})
+	assert.Error(t, err)
+}
+
+func TestReflectValuesUintElementError(t *testing.T) {
+	t.Parallel()
+
+	_, err := tasks.ReflectValue("[]uint", []interface{}{json.Number("1"), "not-a-uint"})
+	assert.Error(t, err)
+}
+
+func TestReflectValuesUintElementDirectTypes(t *testing.T) {
+	t.Parallel()
+
+	value, err := tasks.ReflectValue("[]uint64", []interface{}{uint64(1), uint64(2)})
+	assert.NoError(t, err)
+	assert.Equal(t, []uint64{1, 2}, value.Interface())
+}
+
+func TestReflectValuesFloatElementError(t *testing.T) {
+	t.Parallel()
+
+	_, err := tasks.ReflectValue("[]float64", []interface{}{json.Number("1.1"), "not-a-float"})
+	assert.Error(t, err)
+}
+
+func TestReflectValuesStringElementError(t *testing.T) {
+	t.Parallel()
+
+	_, err := tasks.ReflectValue("[]string", []interface{}{"a", 5})
+	assert.Error(t, err)
+}
+
+func TestReflectValuesByteSliceFromBase64String(t *testing.T) {
+	t.Parallel()
+
+	encoded := base64.StdEncoding.EncodeToString([]byte("hello"))
+
+	value, err := tasks.ReflectValue("[]byte", encoded)
+	assert.NoError(t, err)
+	assert.Equal(t, []byte("hello"), value.Interface())
+}
+
+func TestReflectValuesByteSliceInvalidBase64String(t *testing.T) {
+	t.Parallel()
+
+	_, err := tasks.ReflectValue("[]byte", "not-valid-base64!!!")
+	assert.Error(t, err)
+}
+
+func TestIsContextType(t *testing.T) {
+	t.Parallel()
+
+	ctxType := reflect.TypeOf((*context.Context)(nil)).Elem()
+	assert.True(t, tasks.IsContextType(ctxType))
+
+	notCtxType := reflect.TypeOf("string")
+	assert.False(t, tasks.IsContextType(notCtxType))
 }

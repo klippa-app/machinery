@@ -118,7 +118,7 @@ func TestRedisRedisWorkerQuickQuit(t *testing.T) {
 	worker.Quit()
 	delta := time.Since(before)
 
-	threshold := time.Duration(pollPeriod)*time.Millisecond + 1000 // add 1 second as buffer
+	threshold := time.Duration(pollPeriod)*time.Millisecond + time.Second // add 1 second as buffer
 
 	if delta.Nanoseconds() > threshold.Nanoseconds() {
 		t.Error("Worker quit() exceeded timeout")

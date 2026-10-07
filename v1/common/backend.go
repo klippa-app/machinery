@@ -18,8 +18,3 @@ func NewBackend(cnf *config.Config) Backend {
 func (b *Backend) GetConfig() *config.Config {
 	return b.cnf
 }
-
-// IsAMQP ...
-func (b *Backend) IsAMQP() bool {
-	return false
-}

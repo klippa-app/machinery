@@ -4,9 +4,9 @@ import (
 	"context"
 	"errors"
 	"strconv"
-	"strings"
 	"time"
 
+	"github.com/RichardKnop/machinery/v1/common"
 	"github.com/RichardKnop/machinery/v1/config"
 	"github.com/redis/go-redis/v9"
 )
@@ -21,37 +21,25 @@ type Lock struct {
 	interval time.Duration
 }
 
+// defaultRetryInterval is the pause between failed lock attempts in
+// LockWithRetries.
+const defaultRetryInterval = 100 * time.Millisecond
+
 func New(cnf *config.Config, addrs []string, db, retries int) Lock {
 	if retries <= 0 {
 		return Lock{}
 	}
-	lock := Lock{retries: retries}
+	lock := Lock{retries: retries, interval: defaultRetryInterval}
 
-	var password string
-
-	parts := strings.Split(addrs[0], "@")
-	if len(parts) >= 2 {
-		password = strings.Join(parts[:len(parts)-1], "@")
-		addrs[0] = parts[len(parts)-1] // addr is the last one without @
-	}
-
-	ropt := &redis.UniversalOptions{
-		Addrs:    addrs,
-		DB:       db,
-		Password: password,
-	}
-	if cnf.Redis != nil {
-		ropt.MasterName = cnf.Redis.MasterName
-	}
-
-	lock.rclient = redis.NewUniversalClient(ropt)
+	ropt := common.NewUniversalOptions(cnf, addrs, db, "")
+	lock.rclient = common.NewUniversalClient(cnf, ropt)
 
 	return lock
 }
 
-func (r Lock) LockWithRetries(key string, unixTsToExpireNs int64) error {
+func (r Lock) LockWithRetries(ctx context.Context, key string, unixTsToExpireNs int64) error {
 	for i := 0; i <= r.retries; i++ {
-		err := r.Lock(key, unixTsToExpireNs)
+		err := r.Lock(ctx, key, unixTsToExpireNs)
 		if err == nil {
 			//成功拿到锁，返回
 			return nil
@@ -62,11 +50,9 @@ func (r Lock) LockWithRetries(key string, unixTsToExpireNs int64) error {
 	return ErrRedisLockFailed
 }
 
-func (r Lock) Lock(key string, unixTsToExpireNs int64) error {
+func (r Lock) Lock(ctx context.Context, key string, unixTsToExpireNs int64) error {
 	now := time.Now().UnixNano()
 	expiration := time.Duration(unixTsToExpireNs + 1 - now)
-	// ctx := r.rclient.Context()
-	ctx := context.Background()
 
 	success, err := r.rclient.SetNX(ctx, key, unixTsToExpireNs, expiration).Result()
 	if err != nil {

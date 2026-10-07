@@ -1,10 +1,14 @@
 package config_test
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/RichardKnop/machinery/v1/config"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 var configYAMLData = `---
@@ -12,19 +16,6 @@ broker: broker
 default_queue: default_queue
 result_backend: result_backend
 results_expire_in: 123456
-amqp:
-  binding_key: binding_key
-  exchange: exchange
-  exchange_type: exchange_type
-  prefetch_count: 123
-  queue_declare_args:
-    x-max-priority: 10
-  queue_binding_args:
-    image-type: png
-    x-match: any
-sqs:
-  receive_wait_time_seconds: 123
-  receive_visibility_timeout: 456
 redis:
   max_idle: 12
   max_active: 123
@@ -38,9 +29,6 @@ redis:
   delayed_tasks_key: delayed_tasks_key
   master_name: master_name
 no_unix_signals: true
-dynamodb:
-  task_states_table: task_states_table
-  group_metas_table: group_metas_table
 `
 
 func TestReadFromFile(t *testing.T) {
@@ -67,17 +55,6 @@ func TestNewFromYaml(t *testing.T) {
 	assert.Equal(t, "result_backend", cnf.ResultBackend)
 	assert.Equal(t, 123456, cnf.ResultsExpireIn)
 
-	assert.Equal(t, "exchange", cnf.AMQP.Exchange)
-	assert.Equal(t, "exchange_type", cnf.AMQP.ExchangeType)
-	assert.Equal(t, "binding_key", cnf.AMQP.BindingKey)
-	assert.Equal(t, 10, cnf.AMQP.QueueDeclareArgs["x-max-priority"])
-	assert.Equal(t, "any", cnf.AMQP.QueueBindingArgs["x-match"])
-	assert.Equal(t, "png", cnf.AMQP.QueueBindingArgs["image-type"])
-	assert.Equal(t, 123, cnf.AMQP.PrefetchCount)
-
-	assert.Equal(t, 123, cnf.SQS.WaitTimeSeconds)
-	assert.Equal(t, 456, *cnf.SQS.VisibilityTimeout)
-
 	assert.Equal(t, 12, cnf.Redis.MaxIdle)
 	assert.Equal(t, 123, cnf.Redis.MaxActive)
 	assert.Equal(t, 456, cnf.Redis.IdleTimeout)
@@ -91,7 +68,55 @@ func TestNewFromYaml(t *testing.T) {
 	assert.Equal(t, "master_name", cnf.Redis.MasterName)
 
 	assert.Equal(t, true, cnf.NoUnixSignals)
+}
 
-	assert.Equal(t, "task_states_table", cnf.DynamoDB.TaskStatesTable)
-	assert.Equal(t, "group_metas_table", cnf.DynamoDB.GroupMetasTable)
+func TestReadFromFile_OpenError(t *testing.T) {
+	t.Parallel()
+
+	_, err := config.ReadFromFile(filepath.Join(t.TempDir(), "does-not-exist.yml"))
+	assert.Error(t, err)
+}
+
+func TestReadFromFile_ReadError(t *testing.T) {
+	t.Parallel()
+
+	_, err := config.ReadFromFile(t.TempDir())
+	assert.Error(t, err)
+}
+
+func TestNewFromYaml_FileNotFound(t *testing.T) {
+	t.Parallel()
+
+	_, err := config.NewFromYaml(filepath.Join(t.TempDir(), "does-not-exist.yml"), false)
+	assert.Error(t, err)
+}
+
+func TestNewFromYaml_InvalidYaml(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "invalid.yml")
+	require.NoError(t, os.WriteFile(path, []byte("broker: [unterminated"), 0o644))
+
+	_, err := config.NewFromYaml(path, false)
+	assert.Error(t, err)
+}
+
+func TestNewFromYaml_ReloadFailure(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "reload.yml")
+	require.NoError(t, os.WriteFile(path, []byte("broker: broker-v1\n"), 0o644))
+
+	cnf, err := config.NewFromYaml(path, true)
+	require.NoError(t, err)
+	assert.Equal(t, "broker-v1", cnf.Broker)
+
+	// Removing the file makes every subsequent reload attempt fail, so the
+	// background reload goroutine only ever exercises its error branch and
+	// never writes to cnf again - reading cnf.Broker below is race-free.
+	require.NoError(t, os.Remove(path))
+
+	time.Sleep(11 * time.Second)
+
+	assert.Equal(t, "broker-v1", cnf.Broker)
 }

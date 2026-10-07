@@ -1,6 +1,7 @@
 package eager_test
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
 
@@ -36,7 +37,7 @@ func (s *EagerBackendTestSuite) SetupSuite() {
 	}
 
 	for _, t := range s.st {
-		s.backend.SetStatePending(t)
+		s.backend.SetStatePending(context.Background(), t)
 	}
 
 	// groups
@@ -61,14 +62,14 @@ func (s *EagerBackendTestSuite) SetupSuite() {
 			s.st = append(s.st, sig)
 
 			// default state is pending
-			s.backend.SetStatePending(sig)
+			s.backend.SetStatePending(context.Background(), sig)
 		}
 
-		s.Nil(s.backend.InitGroup(g.id, g.tasks))
+		s.Nil(s.backend.InitGroup(context.Background(), g.id, g.tasks))
 	}
 
 	// prepare for TestInitGroup
-	s.Nil(s.backend.PurgeGroupMeta(s.groups[4].id))
+	s.Nil(s.backend.PurgeGroupMeta(context.Background(), s.groups[4].id))
 }
 
 //
@@ -79,13 +80,13 @@ func (s *EagerBackendTestSuite) TestInitGroup() {
 	// group 5
 	{
 		g := s.groups[4]
-		s.Nil(s.backend.InitGroup(g.id, g.tasks))
+		s.Nil(s.backend.InitGroup(context.Background(), g.id, g.tasks))
 	}
 
 	// group3 -- nil as task list
 	{
 		g := s.groups[2]
-		s.Nil(s.backend.InitGroup(g.id, g.tasks))
+		s.Nil(s.backend.InitGroup(context.Background(), g.id, g.tasks))
 	}
 }
 
@@ -94,7 +95,7 @@ func (s *EagerBackendTestSuite) TestGroupCompleted() {
 	{
 		// all tasks are pending
 		g := s.groups[0]
-		completed, err := s.backend.GroupCompleted(g.id, len(g.tasks))
+		completed, err := s.backend.GroupCompleted(context.Background(), g.id, len(g.tasks))
 		s.False(completed)
 		s.Nil(err)
 
@@ -106,10 +107,10 @@ func (s *EagerBackendTestSuite) TestGroupCompleted() {
 				break
 			}
 
-			s.backend.SetStateSuccess(t, nil)
+			s.backend.SetStateSuccess(context.Background(), t, nil)
 		}
 
-		completed, err = s.backend.GroupCompleted(g.id, len(g.tasks))
+		completed, err = s.backend.GroupCompleted(context.Background(), g.id, len(g.tasks))
 		s.True(completed)
 		s.Nil(err)
 	}
@@ -118,7 +119,7 @@ func (s *EagerBackendTestSuite) TestGroupCompleted() {
 	{
 		g := s.groups[1]
 
-		completed, err := s.backend.GroupCompleted(g.id, len(g.tasks))
+		completed, err := s.backend.GroupCompleted(context.Background(), g.id, len(g.tasks))
 		s.False(completed)
 		s.Nil(err)
 
@@ -130,17 +131,17 @@ func (s *EagerBackendTestSuite) TestGroupCompleted() {
 				break
 			}
 
-			s.backend.SetStateFailure(t, "just a test")
+			s.backend.SetStateFailure(context.Background(), t, "just a test")
 		}
 
-		completed, err = s.backend.GroupCompleted(g.id, len(g.tasks))
+		completed, err = s.backend.GroupCompleted(context.Background(), g.id, len(g.tasks))
 		s.True(completed)
 		s.Nil(err)
 	}
 
 	{
 		// call on a not-existed group
-		completed, err := s.backend.GroupCompleted("", 0)
+		completed, err := s.backend.GroupCompleted(context.Background(), "", 0)
 		s.False(completed)
 		s.NotNil(err)
 	}
@@ -159,11 +160,11 @@ func (s *EagerBackendTestSuite) TestGroupTaskStates() {
 				break
 			}
 
-			s.backend.SetStateFailure(t, t.UUID)
+			s.backend.SetStateFailure(context.Background(), t, t.UUID)
 		}
 
 		// get states back
-		ts, err := s.backend.GroupTaskStates(g.id, len(g.tasks))
+		ts, err := s.backend.GroupTaskStates(context.Background(), g.id, len(g.tasks))
 		s.NotNil(ts)
 		s.Nil(err)
 		for _, t := range ts {
@@ -173,7 +174,7 @@ func (s *EagerBackendTestSuite) TestGroupTaskStates() {
 
 	{
 		// call on a not-existed group
-		ts, err := s.backend.GroupTaskStates("", 0)
+		ts, err := s.backend.GroupTaskStates(context.Background(), "", 0)
 		s.Nil(ts)
 		s.NotNil(err)
 	}
@@ -185,12 +186,12 @@ func (s *EagerBackendTestSuite) TestSetStatePending() {
 		t := s.st[0]
 
 		// change this state to receiving
-		s.backend.SetStateReceived(t)
+		s.backend.SetStateReceived(context.Background(), t)
 
 		// change it back to pending
-		s.backend.SetStatePending(t)
+		s.backend.SetStatePending(context.Background(), t)
 
-		st, err := s.backend.GetState(t.UUID)
+		st, err := s.backend.GetState(context.Background(), t.UUID)
 		s.Nil(err)
 		if st != nil {
 			s.Equal(tasks.StatePending, st.State)
@@ -202,8 +203,8 @@ func (s *EagerBackendTestSuite) TestSetStateReceived() {
 	// task2
 	{
 		t := s.st[1]
-		s.backend.SetStateReceived(t)
-		st, err := s.backend.GetState(t.UUID)
+		s.backend.SetStateReceived(context.Background(), t)
+		st, err := s.backend.GetState(context.Background(), t.UUID)
 		s.Nil(err)
 		if st != nil {
 			s.Equal(tasks.StateReceived, st.State)
@@ -215,8 +216,8 @@ func (s *EagerBackendTestSuite) TestSetStateStarted() {
 	// task3
 	{
 		t := s.st[2]
-		s.backend.SetStateStarted(t)
-		st, err := s.backend.GetState(t.UUID)
+		s.backend.SetStateStarted(context.Background(), t)
+		st, err := s.backend.GetState(context.Background(), t.UUID)
 		s.Nil(err)
 		if st != nil {
 			s.Equal(tasks.StateStarted, st.State)
@@ -234,8 +235,8 @@ func (s *EagerBackendTestSuite) TestSetStateSuccess() {
 				Value: json.Number("300.0"),
 			},
 		}
-		s.backend.SetStateSuccess(t, taskResults)
-		st, err := s.backend.GetState(t.UUID)
+		s.backend.SetStateSuccess(context.Background(), t, taskResults)
+		st, err := s.backend.GetState(context.Background(), t.UUID)
 		s.Nil(err)
 		s.NotNil(st)
 
@@ -248,8 +249,8 @@ func (s *EagerBackendTestSuite) TestSetStateFailure() {
 	// task5
 	{
 		t := s.st[4]
-		s.backend.SetStateFailure(t, "error")
-		st, err := s.backend.GetState(t.UUID)
+		s.backend.SetStateFailure(context.Background(), t, "error")
+		st, err := s.backend.GetState(context.Background(), t.UUID)
 		s.Nil(err)
 		if st != nil {
 			s.Equal(tasks.StateFailure, st.State)
@@ -262,8 +263,8 @@ func (s *EagerBackendTestSuite) TestSetStateRetry() {
 	// task6
 	{
 		t := s.st[5]
-		s.backend.SetStateRetry(t)
-		st, err := s.backend.GetState(t.UUID)
+		s.backend.SetStateRetry(context.Background(), t)
+		st, err := s.backend.GetState(context.Background(), t.UUID)
 		s.Nil(err)
 		if st != nil {
 			s.Equal(tasks.StateRetry, st.State)
@@ -273,7 +274,7 @@ func (s *EagerBackendTestSuite) TestSetStateRetry() {
 
 func (s *EagerBackendTestSuite) TestGetState() {
 	// get something not existed -- empty string
-	st, err := s.backend.GetState("")
+	st, err := s.backend.GetState(context.Background(), "")
 	s.Nil(st)
 	s.NotNil(err)
 }
@@ -282,22 +283,22 @@ func (s *EagerBackendTestSuite) TestPurgeState() {
 	// task6
 	{
 		t := s.st[5]
-		st, err := s.backend.GetState(t.UUID)
+		st, err := s.backend.GetState(context.Background(), t.UUID)
 		s.NotNil(st)
 		s.Nil(err)
 
 		// purge it
-		s.Nil(s.backend.PurgeState(t.UUID))
+		s.Nil(s.backend.PurgeState(context.Background(), t.UUID))
 
 		// should be not found
-		st, err = s.backend.GetState(t.UUID)
+		st, err = s.backend.GetState(context.Background(), t.UUID)
 		s.Nil(st)
 		s.NotNil(err)
 	}
 
 	{
 		// purge a not-existed state
-		s.NotNil(s.backend.PurgeState(""))
+		s.NotNil(s.backend.PurgeState(context.Background(), ""))
 	}
 }
 
@@ -305,28 +306,26 @@ func (s *EagerBackendTestSuite) TestPurgeGroupMeta() {
 	// group4
 	{
 		g := s.groups[3]
-		ts, err := s.backend.GroupTaskStates(g.id, len(g.tasks))
+		ts, err := s.backend.GroupTaskStates(context.Background(), g.id, len(g.tasks))
 		s.NotNil(ts)
 		s.Nil(err)
 
 		// purge group
-		s.Nil(s.backend.PurgeGroupMeta(g.id))
+		s.Nil(s.backend.PurgeGroupMeta(context.Background(), g.id))
 
 		// should be not found
-		ts, err = s.backend.GroupTaskStates(g.id, len(g.tasks))
+		ts, err = s.backend.GroupTaskStates(context.Background(), g.id, len(g.tasks))
 		s.Nil(ts)
 		s.NotNil(err)
 	}
 
 	{
 		// purge a not-existed group
-		s.NotNil(s.backend.PurgeGroupMeta(""))
+		s.NotNil(s.backend.PurgeGroupMeta(context.Background(), ""))
 	}
 }
 
-//
 // internal method
-//
 func (s *EagerBackendTestSuite) getTaskSignature(taskUUID string) *tasks.Signature {
 	for _, v := range s.st {
 		if v.UUID == taskUUID {

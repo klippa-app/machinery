@@ -1,6 +1,7 @@
 package integration_test
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"testing"
@@ -21,7 +22,7 @@ func TestRedisGetPendingTasks(t *testing.T) {
 		ResultBackend: fmt.Sprintf("redis://%v", redisURL),
 		Lock:          fmt.Sprintf("redis://%v", redisURL),
 	})
-	pendingMessages, err := server.GetBroker().GetPendingTasks(server.GetConfig().DefaultQueue)
+	pendingMessages, err := server.GetBroker().GetPendingTasks(context.Background(), server.GetConfig().DefaultQueue)
 	if err != nil {
 		t.Error(err)
 	}

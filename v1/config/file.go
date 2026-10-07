@@ -61,8 +61,12 @@ func ReadFromFile(cnfPath string) ([]byte, error) {
 }
 
 func fromFile(cnfPath string) (*Config, error) {
-	loadedCnf, cnf := new(Config), new(Config)
+	cnf := new(Config)
 	*cnf = *defaultCnf
+	if defaultCnf.Redis != nil {
+		redisCnf := *defaultCnf.Redis
+		cnf.Redis = &redisCnf
+	}
 
 	data, err := ReadFromFile(cnfPath)
 	if err != nil {
@@ -71,12 +75,6 @@ func fromFile(cnfPath string) (*Config, error) {
 
 	if err := yaml.Unmarshal(data, cnf); err != nil {
 		return nil, fmt.Errorf("Unmarshal YAML error: %s", err)
-	}
-	if err := yaml.Unmarshal(data, loadedCnf); err != nil {
-		return nil, fmt.Errorf("Unmarshal YAML error: %s", err)
-	}
-	if loadedCnf.AMQP == nil {
-		cnf.AMQP = nil
 	}
 
 	return cnf, nil

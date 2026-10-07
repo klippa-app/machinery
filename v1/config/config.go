@@ -2,14 +2,7 @@ package config
 
 import (
 	"crypto/tls"
-	"fmt"
-	"strings"
 	"time"
-
-	"cloud.google.com/go/pubsub"
-	"github.com/aws/aws-sdk-go/service/dynamodb"
-	"github.com/aws/aws-sdk-go/service/sqs"
-	"go.mongodb.org/mongo-driver/mongo"
 )
 
 const (
@@ -20,20 +13,10 @@ const (
 var (
 	// Start with sensible default values
 	defaultCnf = &Config{
-		Broker:          "amqp://guest:guest@localhost:5672/",
+		Broker:          "redis://127.0.0.1:6379",
 		DefaultQueue:    "machinery_tasks",
-		ResultBackend:   "amqp://guest:guest@localhost:5672/",
+		ResultBackend:   "redis://127.0.0.1:6379",
 		ResultsExpireIn: DefaultResultsExpireIn,
-		AMQP: &AMQPConfig{
-			Exchange:      "machinery_exchange",
-			ExchangeType:  "direct",
-			BindingKey:    "machinery_task",
-			PrefetchCount: 3,
-		},
-		DynamoDB: &DynamoDBConfig{
-			TaskStatesTable: "task_states",
-			GroupMetasTable: "group_metas",
-		},
 		Redis: &RedisConfig{
 			MaxIdle:                3,
 			IdleTimeout:            240,
@@ -43,9 +26,6 @@ var (
 			NormalTasksPollPeriod:  1000,
 			DelayedTasksPollPeriod: 500,
 		},
-		GCPPubSub: &GCPPubSubConfig{
-			Client: nil,
-		},
 	}
 
 	reloadDelay = time.Second * 10
@@ -53,55 +33,16 @@ var (
 
 // Config holds all configuration for our program
 type Config struct {
-	Broker                  string           `yaml:"broker" envconfig:"BROKER"`
-	Lock                    string           `yaml:"lock" envconfig:"LOCK"`
-	MultipleBrokerSeparator string           `yaml:"multiple_broker_separator" envconfig:"MULTIPLE_BROKEN_SEPARATOR"`
-	DefaultQueue            string           `yaml:"default_queue" envconfig:"DEFAULT_QUEUE"`
-	ResultBackend           string           `yaml:"result_backend" envconfig:"RESULT_BACKEND"`
-	ResultsExpireIn         int              `yaml:"results_expire_in" envconfig:"RESULTS_EXPIRE_IN"`
-	AMQP                    *AMQPConfig      `yaml:"amqp"`
-	SQS                     *SQSConfig       `yaml:"sqs"`
-	Redis                   *RedisConfig     `yaml:"redis"`
-	GCPPubSub               *GCPPubSubConfig `yaml:"-" ignored:"true"`
-	MongoDB                 *MongoDBConfig   `yaml:"-" ignored:"true"`
+	Broker                  string       `yaml:"broker" envconfig:"BROKER"`
+	Lock                    string       `yaml:"lock" envconfig:"LOCK"`
+	MultipleBrokerSeparator string       `yaml:"multiple_broker_separator" envconfig:"MULTIPLE_BROKEN_SEPARATOR"`
+	DefaultQueue            string       `yaml:"default_queue" envconfig:"DEFAULT_QUEUE"`
+	ResultBackend           string       `yaml:"result_backend" envconfig:"RESULT_BACKEND"`
+	ResultsExpireIn         int          `yaml:"results_expire_in" envconfig:"RESULTS_EXPIRE_IN"`
+	Redis                   *RedisConfig `yaml:"redis"`
 	TLSConfig               *tls.Config
 	// NoUnixSignals - when set disables signal handling in machinery
-	NoUnixSignals bool            `yaml:"no_unix_signals" envconfig:"NO_UNIX_SIGNALS"`
-	DynamoDB      *DynamoDBConfig `yaml:"dynamodb"`
-}
-
-// QueueBindingArgs arguments which are used when binding to the exchange
-type QueueBindingArgs map[string]interface{}
-
-// QueueDeclareArgs arguments which are used when declaring a queue
-type QueueDeclareArgs map[string]interface{}
-
-// AMQPConfig wraps RabbitMQ related configuration
-type AMQPConfig struct {
-	Exchange         string           `yaml:"exchange" envconfig:"AMQP_EXCHANGE"`
-	ExchangeType     string           `yaml:"exchange_type" envconfig:"AMQP_EXCHANGE_TYPE"`
-	QueueDeclareArgs QueueDeclareArgs `yaml:"queue_declare_args" envconfig:"AMQP_QUEUE_DECLARE_ARGS"`
-	QueueBindingArgs QueueBindingArgs `yaml:"queue_binding_args" envconfig:"AMQP_QUEUE_BINDING_ARGS"`
-	BindingKey       string           `yaml:"binding_key" envconfig:"AMQP_BINDING_KEY"`
-	PrefetchCount    int              `yaml:"prefetch_count" envconfig:"AMQP_PREFETCH_COUNT"`
-	AutoDelete       bool             `yaml:"auto_delete" envconfig:"AMQP_AUTO_DELETE"`
-	DelayedQueue     string           `yaml:"delayed_queue" envconfig:"AMQP_DELAYED_QUEUE"`
-}
-
-// DynamoDBConfig wraps DynamoDB related configuration
-type DynamoDBConfig struct {
-	Client          *dynamodb.DynamoDB
-	TaskStatesTable string `yaml:"task_states_table" envconfig:"TASK_STATES_TABLE"`
-	GroupMetasTable string `yaml:"group_metas_table" envconfig:"GROUP_METAS_TABLE"`
-}
-
-// SQSConfig wraps SQS related configuration
-type SQSConfig struct {
-	Client          *sqs.SQS
-	WaitTimeSeconds int `yaml:"receive_wait_time_seconds" envconfig:"SQS_WAIT_TIME_SECONDS"`
-	// https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/sqs-visibility-timeout.html
-	// visibility timeout should default to nil to use the overall visibility timeout for the queue
-	VisibilityTimeout *int `yaml:"receive_visibility_timeout" envconfig:"SQS_VISIBILITY_TIMEOUT"`
+	NoUnixSignals bool `yaml:"no_unix_signals" envconfig:"NO_UNIX_SIGNALS"`
 }
 
 // RedisConfig ...
@@ -155,32 +96,4 @@ type RedisConfig struct {
 	MasterName string `yaml:"master_name" envconfig:"REDIS_MASTER_NAME"`
 	// ClusterMode specifies machinery should use redis cluster client explicitly
 	ClusterMode bool `yaml:"cluster_mode" envconfig:"REDIS_CLUSTER_MODE"`
-}
-
-// GCPPubSubConfig wraps GCP PubSub related configuration
-type GCPPubSubConfig struct {
-	Client       *pubsub.Client
-	MaxExtension time.Duration
-}
-
-// MongoDBConfig ...
-type MongoDBConfig struct {
-	Client   *mongo.Client
-	Database string
-}
-
-// Decode from yaml to map (any field whose type or pointer-to-type implements
-// envconfig.Decoder can control its own deserialization)
-func (args *QueueBindingArgs) Decode(value string) error {
-	pairs := strings.Split(value, ",")
-	mp := make(map[string]interface{}, len(pairs))
-	for _, pair := range pairs {
-		kvpair := strings.Split(pair, ":")
-		if len(kvpair) != 2 {
-			return fmt.Errorf("invalid map item: %q", pair)
-		}
-		mp[kvpair[0]] = kvpair[1]
-	}
-	*args = QueueBindingArgs(mp)
-	return nil
 }

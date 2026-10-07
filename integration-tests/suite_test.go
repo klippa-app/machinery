@@ -59,7 +59,7 @@ func testSendTask(server Server, t *testing.T) {
 		t.Error(err)
 	}
 
-	results, err := asyncResult.Get(time.Duration(time.Millisecond * 5))
+	results, err := asyncResult.Get(context.Background(), time.Duration(time.Millisecond*5))
 	if err != nil {
 		t.Error(err)
 	}
@@ -82,7 +82,7 @@ func testSendTask(server Server, t *testing.T) {
 		t.Error(err)
 	}
 
-	results, err = asyncResult.Get(time.Duration(time.Millisecond * 5))
+	results, err = asyncResult.Get(context.Background(), time.Duration(time.Millisecond*5))
 	if err != nil {
 		t.Error(err)
 	}
@@ -118,7 +118,7 @@ func testSendGroup(server Server, t *testing.T, sendConcurrency int) {
 	actualResults := make([]int64, 3)
 
 	for i, asyncResult := range asyncResults {
-		results, err := asyncResult.Get(time.Duration(time.Millisecond * 5))
+		results, err := asyncResult.Get(context.Background(), time.Duration(time.Millisecond*5))
 		if err != nil {
 			t.Error(err)
 		}
@@ -158,7 +158,7 @@ func testSendChain(server Server, t *testing.T) {
 		t.Error(err)
 	}
 
-	results, err := chainAsyncResult.Get(time.Duration(time.Millisecond * 5))
+	results, err := chainAsyncResult.Get(context.Background(), time.Duration(time.Millisecond*5))
 	if err != nil {
 		t.Error(err)
 	}
@@ -194,7 +194,7 @@ func testSendChord(server Server, t *testing.T) {
 		t.Error(err)
 	}
 
-	results, err := chordAsyncResult.Get(time.Duration(time.Millisecond * 5))
+	results, err := chordAsyncResult.Get(context.Background(), time.Duration(time.Millisecond*5))
 	if err != nil {
 		t.Error(err)
 	}
@@ -220,7 +220,7 @@ func testReturnJustError(server Server, t *testing.T) {
 		t.Error(err)
 	}
 
-	results, err := asyncResult.Get(time.Duration(time.Millisecond * 5))
+	results, err := asyncResult.Get(context.Background(), time.Duration(time.Millisecond*5))
 	if len(results) != 0 {
 		t.Errorf("Number of results returned = %d. Wanted %d", len(results), 0)
 	}
@@ -233,7 +233,7 @@ func testReturnJustError(server Server, t *testing.T) {
 		t.Error(err)
 	}
 
-	results, err = asyncResult.Get(time.Duration(time.Millisecond * 5))
+	results, err = asyncResult.Get(context.Background(), time.Duration(time.Millisecond*5))
 	if len(results) != 0 {
 		t.Errorf("Number of results returned = %d. Wanted %d", len(results), 0)
 	}
@@ -249,7 +249,7 @@ func testReturnMultipleValues(server Server, t *testing.T) {
 		t.Error(err)
 	}
 
-	results, err := asyncResult.Get(time.Duration(time.Millisecond * 5))
+	results, err := asyncResult.Get(context.Background(), time.Duration(time.Millisecond*5))
 	if err != nil {
 		t.Error(err)
 	}
@@ -282,7 +282,7 @@ func testReturnMultipleValues(server Server, t *testing.T) {
 		t.Error(err)
 	}
 
-	results, err = asyncResult.Get(time.Duration(time.Millisecond * 5))
+	results, err = asyncResult.Get(context.Background(), time.Duration(time.Millisecond*5))
 	if len(results) != 0 {
 		t.Errorf("Number of results returned = %d. Wanted %d", len(results), 0)
 	}
@@ -296,7 +296,7 @@ func testPanic(server Server, t *testing.T) {
 		t.Error(err)
 	}
 
-	results, err := asyncResult.Get(time.Duration(time.Millisecond * 5))
+	results, err := asyncResult.Get(context.Background(), time.Duration(time.Millisecond*5))
 	if len(results) != 0 {
 		t.Errorf("Number of results returned = %d. Wanted %d", len(results), 0)
 	}
@@ -312,7 +312,7 @@ func testDelay(server Server, t *testing.T) {
 		t.Error(err)
 	}
 
-	results, err := asyncResult.Get(time.Duration(5 * time.Millisecond))
+	results, err := asyncResult.Get(context.Background(), time.Duration(5*time.Millisecond))
 	if err != nil {
 		t.Error(err)
 	}

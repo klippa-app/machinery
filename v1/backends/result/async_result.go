@@ -1,6 +1,7 @@
 package result
 
 import (
+	"context"
 	"errors"
 	"reflect"
 	"time"
@@ -71,17 +72,12 @@ func NewChainAsyncResult(tasks []*tasks.Signature, backend iface.Backend) *Chain
 }
 
 // Touch the state and don't wait
-func (asyncResult *AsyncResult) Touch() ([]reflect.Value, error) {
+func (asyncResult *AsyncResult) Touch(ctx context.Context) ([]reflect.Value, error) {
 	if asyncResult.backend == nil {
 		return nil, ErrBackendNotConfigured
 	}
 
-	asyncResult.GetState()
-
-	// Purge state if we are using AMQP backend
-	if asyncResult.backend.IsAMQP() && asyncResult.taskState.IsCompleted() {
-		asyncResult.backend.PurgeState(asyncResult.taskState.TaskUUID)
-	}
+	asyncResult.GetState(ctx)
 
 	if asyncResult.taskState.IsFailure() {
 		return nil, errors.New(asyncResult.taskState.Error)
@@ -95,9 +91,9 @@ func (asyncResult *AsyncResult) Touch() ([]reflect.Value, error) {
 }
 
 // Get returns task results (synchronous blocking call)
-func (asyncResult *AsyncResult) Get(sleepDuration time.Duration) ([]reflect.Value, error) {
+func (asyncResult *AsyncResult) Get(ctx context.Context, sleepDuration time.Duration) ([]reflect.Value, error) {
 	for {
-		results, err := asyncResult.Touch()
+		results, err := asyncResult.Touch(ctx)
 
 		if results == nil && err == nil {
 			time.Sleep(sleepDuration)
@@ -108,7 +104,7 @@ func (asyncResult *AsyncResult) Get(sleepDuration time.Duration) ([]reflect.Valu
 }
 
 // GetWithTimeout returns task results with a timeout (synchronous blocking call)
-func (asyncResult *AsyncResult) GetWithTimeout(timeoutDuration, sleepDuration time.Duration) ([]reflect.Value, error) {
+func (asyncResult *AsyncResult) GetWithTimeout(ctx context.Context, timeoutDuration, sleepDuration time.Duration) ([]reflect.Value, error) {
 	timeout := time.NewTimer(timeoutDuration)
 
 	for {
@@ -116,7 +112,7 @@ func (asyncResult *AsyncResult) GetWithTimeout(timeoutDuration, sleepDuration ti
 		case <-timeout.C:
 			return nil, ErrTimeoutReached
 		default:
-			results, err := asyncResult.Touch()
+			results, err := asyncResult.Touch(ctx)
 
 			if results == nil && err == nil {
 				time.Sleep(sleepDuration)
@@ -128,12 +124,12 @@ func (asyncResult *AsyncResult) GetWithTimeout(timeoutDuration, sleepDuration ti
 }
 
 // GetState returns latest task state
-func (asyncResult *AsyncResult) GetState() *tasks.TaskState {
+func (asyncResult *AsyncResult) GetState(ctx context.Context) *tasks.TaskState {
 	if asyncResult.taskState.IsCompleted() {
 		return asyncResult.taskState
 	}
 
-	taskState, err := asyncResult.backend.GetState(asyncResult.Signature.UUID)
+	taskState, err := asyncResult.backend.GetState(ctx, asyncResult.Signature.UUID)
 	if err == nil {
 		asyncResult.taskState = taskState
 	}
@@ -142,7 +138,7 @@ func (asyncResult *AsyncResult) GetState() *tasks.TaskState {
 }
 
 // Get returns results of a chain of tasks (synchronous blocking call)
-func (chainAsyncResult *ChainAsyncResult) Get(sleepDuration time.Duration) ([]reflect.Value, error) {
+func (chainAsyncResult *ChainAsyncResult) Get(ctx context.Context, sleepDuration time.Duration) ([]reflect.Value, error) {
 	if chainAsyncResult.backend == nil {
 		return nil, ErrBackendNotConfigured
 	}
@@ -153,7 +149,7 @@ func (chainAsyncResult *ChainAsyncResult) Get(sleepDuration time.Duration) ([]re
 	)
 
 	for _, asyncResult := range chainAsyncResult.asyncResults {
-		results, err = asyncResult.Get(sleepDuration)
+		results, err = asyncResult.Get(ctx, sleepDuration)
 		if err != nil {
 			return nil, err
 		}
@@ -163,24 +159,24 @@ func (chainAsyncResult *ChainAsyncResult) Get(sleepDuration time.Duration) ([]re
 }
 
 // Get returns result of a chord (synchronous blocking call)
-func (chordAsyncResult *ChordAsyncResult) Get(sleepDuration time.Duration) ([]reflect.Value, error) {
+func (chordAsyncResult *ChordAsyncResult) Get(ctx context.Context, sleepDuration time.Duration) ([]reflect.Value, error) {
 	if chordAsyncResult.backend == nil {
 		return nil, ErrBackendNotConfigured
 	}
 
 	var err error
 	for _, asyncResult := range chordAsyncResult.groupAsyncResults {
-		_, err = asyncResult.Get(sleepDuration)
+		_, err = asyncResult.Get(ctx, sleepDuration)
 		if err != nil {
 			return nil, err
 		}
 	}
 
-	return chordAsyncResult.chordAsyncResult.Get(sleepDuration)
+	return chordAsyncResult.chordAsyncResult.Get(ctx, sleepDuration)
 }
 
 // GetWithTimeout returns results of a chain of tasks with timeout (synchronous blocking call)
-func (chainAsyncResult *ChainAsyncResult) GetWithTimeout(timeoutDuration, sleepDuration time.Duration) ([]reflect.Value, error) {
+func (chainAsyncResult *ChainAsyncResult) GetWithTimeout(ctx context.Context, timeoutDuration, sleepDuration time.Duration) ([]reflect.Value, error) {
 	if chainAsyncResult.backend == nil {
 		return nil, ErrBackendNotConfigured
 	}
@@ -201,13 +197,13 @@ func (chainAsyncResult *ChainAsyncResult) GetWithTimeout(timeoutDuration, sleepD
 		default:
 
 			for _, asyncResult := range chainAsyncResult.asyncResults {
-				_, err = asyncResult.Touch()
+				_, err = asyncResult.Touch(ctx)
 				if err != nil {
 					return nil, err
 				}
 			}
 
-			results, err = lastResult.Touch()
+			results, err = lastResult.Touch(ctx)
 			if err != nil {
 				return nil, err
 			}
@@ -220,7 +216,7 @@ func (chainAsyncResult *ChainAsyncResult) GetWithTimeout(timeoutDuration, sleepD
 }
 
 // GetWithTimeout returns result of a chord with a timeout (synchronous blocking call)
-func (chordAsyncResult *ChordAsyncResult) GetWithTimeout(timeoutDuration, sleepDuration time.Duration) ([]reflect.Value, error) {
+func (chordAsyncResult *ChordAsyncResult) GetWithTimeout(ctx context.Context, timeoutDuration, sleepDuration time.Duration) ([]reflect.Value, error) {
 	if chordAsyncResult.backend == nil {
 		return nil, ErrBackendNotConfigured
 	}
@@ -237,13 +233,13 @@ func (chordAsyncResult *ChordAsyncResult) GetWithTimeout(timeoutDuration, sleepD
 			return nil, ErrTimeoutReached
 		default:
 			for _, asyncResult := range chordAsyncResult.groupAsyncResults {
-				_, errcur := asyncResult.Touch()
+				_, errcur := asyncResult.Touch(ctx)
 				if errcur != nil {
 					return nil, err
 				}
 			}
 
-			results, err = chordAsyncResult.chordAsyncResult.Touch()
+			results, err = chordAsyncResult.chordAsyncResult.Touch(ctx)
 			if err != nil {
 				return nil, nil
 			}
