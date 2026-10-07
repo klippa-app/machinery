@@ -96,4 +96,51 @@ type RedisConfig struct {
 	MasterName string `yaml:"master_name" envconfig:"REDIS_MASTER_NAME"`
 	// ClusterMode specifies machinery should use redis cluster client explicitly
 	ClusterMode bool `yaml:"cluster_mode" envconfig:"REDIS_CLUSTER_MODE"`
+
+	// Partitioning enables per-partition-key concurrency limits for this
+	// broker's queue (see tasks.Signature.PartitionKey). Nil (the default)
+	// disables partitioning entirely: PartitionKey is ignored and every task
+	// shares the plain queue exactly as before.
+	Partitioning *PartitioningConfig `yaml:"partitioning"`
+}
+
+// PartitioningConfig configures per-partition-key concurrency limits, so
+// that a backlog of tasks sharing one partition key (e.g. a customer or
+// tenant ID) cannot starve tasks in other partitions. Modeled after River
+// Pro's concurrency limits: https://riverqueue.com/docs/pro/concurrency-limits
+//
+// Note on latency for brand-new partition keys: a worker blocked waiting
+// for work (BLPOP) only watches the partition keys it already knew about
+// when that wait began. Redis wakes a blocked BLPOP as soon as any watched
+// key receives a push, but a key it isn't watching yet won't wake it. So
+// the very first task published under a partition key a worker hasn't seen
+// before may sit for up to one NormalTasksPollPeriod before being picked
+// up, even though every later task for that same key is dispatched
+// immediately. Unpartitioned tasks and already-seen partition keys are
+// unaffected.
+type PartitioningConfig struct {
+	// GlobalConcurrency caps how many tasks sharing a partition key may be
+	// processed at once across every worker process sharing this Redis
+	// instance. Zero (the default) means no global cap - LocalConcurrency,
+	// if set, still applies.
+	//
+	// Enforced via a self-expiring lease per in-flight task rather than a
+	// plain counter, so a worker process that dies or panics mid-task
+	// doesn't leak that partition's concurrency slot forever - see
+	// LeaseTimeout.
+	GlobalConcurrency int `yaml:"global_concurrency" envconfig:"REDIS_PARTITION_GLOBAL_CONCURRENCY"`
+
+	// LocalConcurrency caps how many tasks sharing a partition key may be
+	// processed at once by this single worker process. Zero (the default)
+	// means no local cap - GlobalConcurrency, if set, still applies.
+	// Enforced in-memory; free of any Redis round trip.
+	LocalConcurrency int `yaml:"local_concurrency" envconfig:"REDIS_PARTITION_LOCAL_CONCURRENCY"`
+
+	// LeaseTimeout bounds how long a global concurrency slot (see
+	// GlobalConcurrency) may be held before it is automatically reclaimed,
+	// in case the worker holding it died or panicked without releasing it.
+	// A task that legitimately runs longer than this will have its slot
+	// reclaimed anyway, so set this comfortably above your longest expected
+	// task duration. Defaults to 1 hour when zero.
+	LeaseTimeout time.Duration `yaml:"lease_timeout" envconfig:"REDIS_PARTITION_LEASE_TIMEOUT"`
 }
