@@ -25,7 +25,14 @@ import (
 
 const defaultRedisDelayedTasksKey = "delayed_tasks"
 
-// Broker represents a Redis broker
+// processingKeySuffix names the list that holds a queue's picked-up, unfinished tasks.
+const processingKeySuffix = ":processing"
+
+// Broker represents a Redis broker.
+//
+// A picked-up task stays in "<queue>:processing" until it is acked or requeued, and whatever
+// is left there is moved back to the queue when consuming starts. This lets tasks survive a
+// killed worker, but requires exactly one consuming process per queue.
 type Broker struct {
 	common.Broker
 	common.RedisConnector
@@ -42,6 +49,9 @@ type Broker struct {
 	redsync              *redsync.Redsync
 	redisOnce            sync.Once
 	redisDelayedTasksKey string
+	// recovered is set once the processing list was moved back; StartConsuming is only
+	// called sequentially, and a later call must not requeue this process's running tasks.
+	recovered bool
 }
 
 // New creates new Broker instance
@@ -89,6 +99,21 @@ func (b *Broker) StartConsuming(consumerTag string, concurrency int, taskProcess
 			return b.GetRetry(), err
 		}
 		return b.GetRetry(), errs.ErrConsumerStopped
+	}
+
+	// Tasks left in the processing list belong to a process that died, so put them back
+	// before picking up anything new.
+	if !b.recovered {
+		if err := b.recoverProcessing(conn, getQueue(b.GetConfig(), taskProcessor)); err != nil {
+			b.GetRetryFunc()(b.GetRetryStopChan())
+
+			if b.GetRetry() {
+				return b.GetRetry(), err
+			}
+			return b.GetRetry(), errs.ErrConsumerStopped
+		}
+
+		b.recovered = true
 	}
 
 	// Channel to which we will push tasks ready for processing by worker
@@ -377,7 +402,15 @@ func (b *Broker) consume(deliveries <-chan []byte, concurrency int, taskProcesso
 			// Consume the task inside a goroutine so multiple tasks
 			// can be processed concurrently
 			go func() {
-				if err := b.consumeOne(d, taskProcessor); err != nil {
+				// Every delivery leaves the processing list exactly once: requeued or acked.
+				requeue, err := b.consumeOne(d, taskProcessor)
+				if requeue {
+					b.requeueMessage(d, taskProcessor)
+				} else {
+					b.ackMessage(d, taskProcessor)
+				}
+
+				if err != nil {
 					errorsChan <- err
 				}
 
@@ -392,13 +425,14 @@ func (b *Broker) consume(deliveries <-chan []byte, concurrency int, taskProcesso
 	}
 }
 
-// consumeOne processes a single message using TaskProcessor
-func (b *Broker) consumeOne(delivery []byte, taskProcessor iface.TaskProcessor) error {
+// consumeOne processes a single message using TaskProcessor.
+// It reports whether the message must go back to the queue instead of being acked.
+func (b *Broker) consumeOne(delivery []byte, taskProcessor iface.TaskProcessor) (bool, error) {
 	signature := new(tasks.Signature)
 	decoder := json.NewDecoder(bytes.NewReader(delivery))
 	decoder.UseNumber()
 	if err := decoder.Decode(signature); err != nil {
-		return errs.NewErrCouldNotUnmarshalTaskSignature(delivery, err)
+		return false, errs.NewErrCouldNotUnmarshalTaskSignature(delivery, err)
 	}
 
 	// If the task is not registered, we requeue it,
@@ -406,19 +440,18 @@ func (b *Broker) consumeOne(delivery []byte, taskProcessor iface.TaskProcessor) 
 	if !b.IsTaskRegistered(signature.Name) {
 		if signature.IgnoreWhenTaskNotRegistered {
 			log.ERROR.Printf("Task not registered with this worker. Not requeuing task type %s with UUID %s in queue %s", signature.Name, signature.UUID, signature.RoutingKey)
-			return nil
+			return false, nil
 		}
 		log.INFO.Printf("Task not registered with this worker. Requeuing task type %s with UUID %s in queue %s", signature.Name, signature.UUID, signature.RoutingKey)
-		b.requeueMessage(delivery, taskProcessor)
-		return nil
+		return true, nil
 	}
 
 	log.DEBUG.Printf("Received new message: %s", delivery)
 
-	return taskProcessor.Process(signature)
+	return false, taskProcessor.Process(signature)
 }
 
-// nextTask pops next available task from the default queue
+// nextTask moves the next available task from the queue to its processing list
 func (b *Broker) nextTask(queue string) (result []byte, err error) {
 	conn := b.open()
 	defer conn.Close()
@@ -439,18 +472,12 @@ func (b *Broker) nextTask(queue string) (result []byte, err error) {
 	//   math.Ceil(0.2) --> 1 (timeout after 1 second)
 	pollPeriodSeconds := math.Ceil(pollPeriod.Seconds())
 
-	items, err := redis.ByteSlices(conn.Do("BLPOP", queue, pollPeriodSeconds))
+	// BLMOVE takes from the head and appends to the processing list in one atomic step, so
+	// the task is in Redis at every moment. Returns redis.ErrNil on timeout.
+	result, err = redis.Bytes(conn.Do("BLMOVE", queue, processingKey(queue), "LEFT", "RIGHT", pollPeriodSeconds))
 	if err != nil {
 		return []byte{}, err
 	}
-
-	// items[0] - the name of the key where an element was popped
-	// items[1] - the value of the popped element
-	if len(items) != 2 {
-		return []byte{}, redis.ErrNil
-	}
-
-	result = items[1]
 
 	return result, nil
 }
@@ -549,8 +576,76 @@ func getQueue(config *config.Config, taskProcessor iface.TaskProcessor) string {
 	return customQueue
 }
 
+func processingKey(queue string) string {
+	return queue + processingKeySuffix
+}
+
+// requeueMessage moves a picked-up task that did not run back to the tail of the queue.
 func (b *Broker) requeueMessage(delivery []byte, taskProcessor iface.TaskProcessor) {
+	queue := getQueue(b.GetConfig(), taskProcessor)
+
 	conn := b.open()
 	defer conn.Close()
-	conn.Do("RPUSH", getQueue(b.GetConfig(), taskProcessor), delivery)
+
+	// One transaction: RPUSH alone would leave a second copy to recover, LREM alone loses it.
+	_ = conn.Send("MULTI")
+	_ = conn.Send("LREM", processingKey(queue), 1, delivery)
+	_ = conn.Send("RPUSH", queue, delivery)
+	if err := execError(redis.Values(conn.Do("EXEC"))); err != nil {
+		log.ERROR.Printf("Could not requeue task in queue %s: %s", queue, err)
+	}
+}
+
+// execError returns the error of an EXEC reply: a failed or aborted transaction, or the first
+// command that failed inside it. Redis has no rollback, so the other commands still ran.
+func execError(replies []interface{}, err error) error {
+	if errors.Is(err, redis.ErrNil) {
+		return errors.New("transaction aborted")
+	}
+	if err != nil {
+		return err
+	}
+
+	for i, reply := range replies {
+		if replyErr, ok := reply.(redis.Error); ok {
+			return fmt.Errorf("command %d in transaction failed: %w", i+1, replyErr)
+		}
+	}
+
+	return nil
+}
+
+// ackMessage removes a task that ran from the processing list.
+func (b *Broker) ackMessage(delivery []byte, taskProcessor iface.TaskProcessor) {
+	queue := getQueue(b.GetConfig(), taskProcessor)
+
+	conn := b.open()
+	defer conn.Close()
+
+	if _, err := conn.Do("LREM", processingKey(queue), 1, delivery); err != nil {
+		// The task stays in the processing list and runs again on the next start.
+		log.ERROR.Printf("Could not ack task in queue %s: %s", queue, err)
+	}
+}
+
+// recoverProcessing moves every task in the processing list back to the head of the queue,
+// keeping their order. Each move is atomic, so an interruption loses nothing.
+func (b *Broker) recoverProcessing(conn redis.Conn, queue string) error {
+	for {
+		delivery, err := redis.Bytes(conn.Do("LMOVE", processingKey(queue), queue, "RIGHT", "LEFT"))
+		if errors.Is(err, redis.ErrNil) {
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("could not recover tasks from %s: %w", processingKey(queue), err)
+		}
+
+		signature := new(tasks.Signature)
+		if err := json.Unmarshal(delivery, signature); err != nil {
+			log.WARNING.Printf("Recovered unreadable task from %s", processingKey(queue))
+			continue
+		}
+
+		log.WARNING.Printf("Recovered task type %s with UUID %s from %s", signature.Name, signature.UUID, processingKey(queue))
+	}
 }
