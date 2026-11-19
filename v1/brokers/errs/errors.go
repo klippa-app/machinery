@@ -29,3 +29,6 @@ var ErrStopTaskDeletion = errors.New("task should not be deleted")
 
 // ErrTaskNotStarted indicates that a task was received but never ran, so it can safely be requeued.
 var ErrTaskNotStarted = errors.New("task not started")
+
+// ErrParkedTaskNotFound indicates that no parked task has the given UUID.
+var ErrParkedTaskNotFound = errors.New("parked task not found")

@@ -13,6 +13,8 @@ import (
 	"github.com/gomodule/redigo/redis"
 
 	"github.com/RichardKnop/machinery/v1"
+	"github.com/RichardKnop/machinery/v1/brokers/errs"
+	redisbroker "github.com/RichardKnop/machinery/v1/brokers/redis"
 	"github.com/RichardKnop/machinery/v1/config"
 	"github.com/RichardKnop/machinery/v1/tasks"
 )
@@ -110,7 +112,7 @@ func newReliableQueueEnv(t *testing.T, options ...func(*config.Config)) *reliabl
 	}
 
 	t.Cleanup(func() {
-		_, _ = conn.Do("DEL", queue, queue+":processing", queue+":delayed")
+		_, _ = conn.Do("DEL", queue, queue+":processing", queue+":delayed", queue+":recovered", queue+":parked")
 		_ = conn.Close()
 	})
 
@@ -444,5 +446,121 @@ func TestRedisReliableQueue_RequeuesTaskThatNeverStarted(t *testing.T) {
 
 	if got := env.runs(); len(got) != 0 {
 		t.Errorf("ran %v, want nothing", got)
+	}
+}
+
+func (e *reliableQueueEnv) broker() *redisbroker.Broker {
+	return e.server.GetBroker().(*redisbroker.Broker)
+}
+
+func (e *reliableQueueEnv) recoveries(signature *tasks.Signature) int {
+	count, err := redis.Int(e.conn.Do("HGET", e.queue+":recovered", signature.UUID))
+	if errors.Is(err, redis.ErrNil) {
+		return 0
+	}
+	if err != nil {
+		e.t.Fatal(err)
+	}
+	return count
+}
+
+func TestRedisReliableQueue_CountsRecoveriesAndResetsThemOnAck(t *testing.T) {
+	env := newReliableQueueEnv(t)
+	left := env.signature("record", "left")
+	env.push(env.processingKey(), left)
+	if _, err := env.conn.Do("HSET", env.queue+":recovered", left.UUID, 1); err != nil {
+		t.Fatal(err)
+	}
+
+	defer env.launch(1)()
+
+	eventually(t, "the recovered task ran and was acked", func() bool {
+		return env.runCount("left") == 1 && len(env.ids(env.processingKey())) == 0
+	})
+	eventually(t, "its recovery count is reset", func() bool { return env.recoveries(left) == 0 })
+	if got := env.ids(env.queue + ":parked"); len(got) != 0 {
+		t.Errorf("parked %v, want nothing", got)
+	}
+}
+
+func TestRedisReliableQueue_ParksTaskOnThirdRecovery(t *testing.T) {
+	env := newReliableQueueEnv(t)
+	poison := env.signature("record", "poison")
+	healthy := env.signature("record", "healthy")
+	env.push(env.processingKey(), healthy)
+	env.push(env.processingKey(), poison)
+	if _, err := env.conn.Do("HSET", env.queue+":recovered", poison.UUID, 2); err != nil {
+		t.Fatal(err)
+	}
+
+	type parked struct {
+		queue, uuid string
+		recoveries  int
+	}
+	reported := make(chan parked, 1)
+	env.broker().SetParkedTaskHandler(func(queue string, signature *tasks.Signature, recoveries int) {
+		reported <- parked{queue, signature.UUID, recoveries}
+	})
+
+	defer env.launch(1)()
+
+	select {
+	case got := <-reported:
+		if want := (parked{env.queue, poison.UUID, 3}); got != want {
+			t.Errorf("handler got %+v, want %+v", got, want)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("handler was not called")
+	}
+
+	eventually(t, "the healthy task ran", func() bool { return env.runCount("healthy") == 1 })
+	if got := env.ids(env.queue + ":parked"); !equalIds(got, "poison") {
+		t.Errorf("parked %v, want [poison]", got)
+	}
+	if env.runCount("poison") != 0 {
+		t.Error("the parked task ran")
+	}
+	if count := env.recoveries(poison); count != 0 {
+		t.Errorf("parked task still has recovery count %d", count)
+	}
+}
+
+func TestRedisReliableQueue_ListsRequeuesAndDeletesParkedTasks(t *testing.T) {
+	env := newReliableQueueEnv(t)
+	first := env.signature("record", "first")
+	second := env.signature("record", "second")
+	env.push(env.queue+":parked", first)
+	env.push(env.queue+":parked", second)
+	broker := env.broker()
+
+	parked, err := broker.GetParkedTasks(env.queue)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(parked) != 2 || parked[0].UUID != first.UUID || parked[1].UUID != second.UUID {
+		t.Fatalf("GetParkedTasks returned %d tasks, want first and second in order", len(parked))
+	}
+
+	if err := broker.RequeueParkedTask(env.queue, "unknown"); !errors.Is(err, errs.ErrParkedTaskNotFound) {
+		t.Errorf("RequeueParkedTask(unknown) = %v, want ErrParkedTaskNotFound", err)
+	}
+	if err := broker.DeleteParkedTask(env.queue, "unknown"); !errors.Is(err, errs.ErrParkedTaskNotFound) {
+		t.Errorf("DeleteParkedTask(unknown) = %v, want ErrParkedTaskNotFound", err)
+	}
+
+	if err := broker.RequeueParkedTask(env.queue, first.UUID); err != nil {
+		t.Fatal(err)
+	}
+	if err := broker.DeleteParkedTask(env.queue, second.UUID); err != nil {
+		t.Fatal(err)
+	}
+	if got := env.ids(env.queue + ":parked"); len(got) != 0 {
+		t.Errorf("parked list is %v, want empty", got)
+	}
+
+	defer env.launch(1)()
+	eventually(t, "the requeued task ran", func() bool { return env.runCount("first") == 1 })
+	if env.runCount("second") != 0 {
+		t.Error("the deleted task ran")
 	}
 }
