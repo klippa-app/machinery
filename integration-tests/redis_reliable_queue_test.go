@@ -43,7 +43,15 @@ func newReliableQueueEnv(t *testing.T) *reliableQueueEnv {
 		DefaultQueue:  queue,
 		ResultBackend: fmt.Sprintf("redis://%v", redisURL),
 		Lock:          fmt.Sprintf("redis://%v", redisURL),
+		// A partial RedisConfig zeroes the pool settings, so spell out common/redis.go's defaults.
 		Redis: &config.RedisConfig{
+			MaxIdle:                10,
+			MaxActive:              100,
+			IdleTimeout:            300,
+			Wait:                   true,
+			ReadTimeout:            15,
+			WriteTimeout:           15,
+			ConnectTimeout:         15,
 			NormalTasksPollPeriod:  100,
 			DelayedTasksPollPeriod: 50,
 			DelayedTasksKey:        queue + ":delayed",
