@@ -26,3 +26,6 @@ var ErrConsumerStopped = errors.New("the server has been stopped")
 
 // ErrStopTaskDeletion indicates that the task should not be deleted from source after task failure
 var ErrStopTaskDeletion = errors.New("task should not be deleted")
+
+// ErrTaskNotStarted indicates that a task was received but never ran, so it can safely be requeued.
+var ErrTaskNotStarted = errors.New("task not started")

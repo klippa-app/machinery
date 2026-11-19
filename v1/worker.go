@@ -145,7 +145,7 @@ func (worker *Worker) Process(signature *tasks.Signature) error {
 
 	// Update task state to RECEIVED
 	if err = worker.server.GetBackend().SetStateReceived(signature); err != nil {
-		return fmt.Errorf("Set state to 'received' for task %s returned error: %s", signature.UUID, err)
+		return fmt.Errorf("Set state to 'received' for task %s returned error: %w: %w", signature.UUID, errs.ErrTaskNotStarted, err)
 	}
 
 	// Prepare task for processing
@@ -166,7 +166,7 @@ func (worker *Worker) Process(signature *tasks.Signature) error {
 
 	// Update task state to STARTED
 	if err = worker.server.GetBackend().SetStateStarted(signature); err != nil {
-		return fmt.Errorf("Set state to 'started' for task %s returned error: %s", signature.UUID, err)
+		return fmt.Errorf("Set state to 'started' for task %s returned error: %w: %w", signature.UUID, errs.ErrTaskNotStarted, err)
 	}
 
 	//Run handler before the task is called

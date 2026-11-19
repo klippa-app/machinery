@@ -31,14 +31,14 @@ type reliableQueueEnv struct {
 	freed   bool
 }
 
-func newReliableQueueEnv(t *testing.T) *reliableQueueEnv {
+func newReliableQueueEnv(t *testing.T, options ...func(*config.Config)) *reliableQueueEnv {
 	redisURL := os.Getenv("REDIS_URL")
 	if redisURL == "" {
 		t.Skip("REDIS_URL is not defined")
 	}
 
 	queue := fmt.Sprintf("reliable_queue_%d", time.Now().UnixNano())
-	server, err := machinery.NewServer(&config.Config{
+	cnf := &config.Config{
 		Broker:        fmt.Sprintf("redis://%v", redisURL),
 		DefaultQueue:  queue,
 		ResultBackend: fmt.Sprintf("redis://%v", redisURL),
@@ -56,7 +56,12 @@ func newReliableQueueEnv(t *testing.T) *reliableQueueEnv {
 			DelayedTasksPollPeriod: 50,
 			DelayedTasksKey:        queue + ":delayed",
 		},
-	})
+	}
+	for _, option := range options {
+		option(cnf)
+	}
+
+	server, err := machinery.NewServer(cnf)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -408,5 +413,36 @@ func TestRedisReliableQueue_RequeueKeepsExactlyOneCopy(t *testing.T) {
 			t.Fatalf("queue has %d and processing list %d copies, want 1 in total", lengths[0], lengths[1])
 		}
 		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+func TestRedisReliableQueue_RequeuesTaskThatNeverStarted(t *testing.T) {
+	// Nothing listens on port 1, so writing the task state fails before the task runs.
+	env := newReliableQueueEnv(t, func(cnf *config.Config) {
+		cnf.ResultBackend = "redis://127.0.0.1:1"
+	})
+	env.push(env.queue, env.signature("record", "never-started"))
+	defer env.launch(1)()
+
+	eventually(t, "the worker picked the task up", func() bool {
+		return len(env.ids(env.processingKey())) > 0 || len(env.ids(env.queue)) == 0
+	})
+
+	for i := 0; i < 25; i++ {
+		_ = env.conn.Send("MULTI")
+		_ = env.conn.Send("LLEN", env.queue)
+		_ = env.conn.Send("LLEN", env.processingKey())
+		lengths, err := redis.Ints(env.conn.Do("EXEC"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if lengths[0]+lengths[1] != 1 {
+			t.Fatalf("queue has %d and processing list %d copies, want 1 in total", lengths[0], lengths[1])
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	if got := env.runs(); len(got) != 0 {
+		t.Errorf("ran %v, want nothing", got)
 	}
 }

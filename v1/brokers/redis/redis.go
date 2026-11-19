@@ -448,7 +448,8 @@ func (b *Broker) consumeOne(delivery []byte, taskProcessor iface.TaskProcessor) 
 
 	log.DEBUG.Printf("Received new message: %s", delivery)
 
-	return false, taskProcessor.Process(signature)
+	err := taskProcessor.Process(signature)
+	return errors.Is(err, errs.ErrTaskNotStarted), err
 }
 
 // nextTask moves the next available task from the queue to its processing list
