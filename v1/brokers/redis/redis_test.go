@@ -46,14 +46,14 @@ func TestExecErrorAgainstRedis(t *testing.T) {
 	defer conn.Close()
 
 	queue := fmt.Sprintf("exec_error_%d", time.Now().UnixNano())
-	defer conn.Do("DEL", queue, processingKey(queue))
+	defer conn.Do("DEL", queue, processingKey(queue, "test"))
 
 	// The processing key holds a string, so LREM fails while RPUSH still runs.
-	_, err = conn.Do("SET", processingKey(queue), "not a list")
+	_, err = conn.Do("SET", processingKey(queue, "test"), "not a list")
 	assert.NoError(t, err)
 
 	_ = conn.Send("MULTI")
-	_ = conn.Send("LREM", processingKey(queue), 1, "task")
+	_ = conn.Send("LREM", processingKey(queue, "test"), 1, "task")
 	_ = conn.Send("RPUSH", queue, "task")
 	err = execError(redis.Values(conn.Do("EXEC")))
 

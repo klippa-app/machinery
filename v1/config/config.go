@@ -155,6 +155,19 @@ type RedisConfig struct {
 	MasterName string `yaml:"master_name" envconfig:"REDIS_MASTER_NAME"`
 	// ClusterMode specifies machinery should use redis cluster client explicitly
 	ClusterMode bool `yaml:"cluster_mode" envconfig:"REDIS_CLUSTER_MODE"`
+
+	// ConsumerHeartbeatPeriod is how often, in milliseconds, a consumer refreshes its heartbeat.
+	// Default: 10000
+	ConsumerHeartbeatPeriod int `yaml:"consumer_heartbeat_period" envconfig:"REDIS_CONSUMER_HEARTBEAT_PERIOD"`
+
+	// ConsumerTTL is how long, in milliseconds, a heartbeat lasts without a refresh. After that
+	// the consumer counts as dead and other consumers recover its picked-up tasks.
+	// Default: 30000
+	ConsumerTTL int `yaml:"consumer_ttl" envconfig:"REDIS_CONSUMER_TTL"`
+
+	// ConsumerReapPeriod is how often, in milliseconds, a consumer looks for dead consumers.
+	// Default: 15000
+	ConsumerReapPeriod int `yaml:"consumer_reap_period" envconfig:"REDIS_CONSUMER_REAP_PERIOD"`
 }
 
 // GCPPubSubConfig wraps GCP PubSub related configuration

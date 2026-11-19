@@ -19,10 +19,11 @@ import (
 	"github.com/RichardKnop/machinery/v1/tasks"
 )
 
-// reliableQueueEnv runs one worker on its own queue, with tasks that record what ran.
+// reliableQueueEnv runs workers on their own queue, with tasks that record what ran.
 type reliableQueueEnv struct {
 	t       *testing.T
 	queue   string
+	cnf     *config.Config
 	server  *machinery.Server
 	conn    redis.Conn
 	mu      sync.Mutex
@@ -57,15 +58,14 @@ func newReliableQueueEnv(t *testing.T, options ...func(*config.Config)) *reliabl
 			NormalTasksPollPeriod:  100,
 			DelayedTasksPollPeriod: 50,
 			DelayedTasksKey:        queue + ":delayed",
+			// Short timings, so a dead consumer is found within a test.
+			ConsumerHeartbeatPeriod: 100,
+			ConsumerTTL:             400,
+			ConsumerReapPeriod:      150,
 		},
 	}
 	for _, option := range options {
 		option(cnf)
-	}
-
-	server, err := machinery.NewServer(cnf)
-	if err != nil {
-		t.Fatal(err)
 	}
 
 	conn, err := redis.Dial("tcp", redisURL)
@@ -76,13 +76,33 @@ func newReliableQueueEnv(t *testing.T, options ...func(*config.Config)) *reliabl
 	env := &reliableQueueEnv{
 		t:       t,
 		queue:   queue,
-		server:  server,
+		cnf:     cnf,
 		conn:    conn,
 		failed:  map[string]bool{},
 		started: make(chan string, 100),
 		release: map[string]chan struct{}{},
 	}
+	env.server = env.newServer()
 
+	t.Cleanup(func() {
+		keys, _ := redis.Values(conn.Do("KEYS", queue+"*"))
+		if len(keys) > 0 {
+			_, _ = conn.Do("DEL", keys...)
+		}
+		_ = conn.Close()
+	})
+
+	return env
+}
+
+// newServer returns a server with its own broker, so its own consumer, on the env's queue.
+func (e *reliableQueueEnv) newServer() *machinery.Server {
+	server, err := machinery.NewServer(e.cnf)
+	if err != nil {
+		e.t.Fatal(err)
+	}
+
+	env := e
 	err = server.RegisterTasks(map[string]interface{}{
 		"record": func(id string) error {
 			env.record(id)
@@ -108,15 +128,10 @@ func newReliableQueueEnv(t *testing.T, options ...func(*config.Config)) *reliabl
 		},
 	})
 	if err != nil {
-		t.Fatal(err)
+		e.t.Fatal(err)
 	}
 
-	t.Cleanup(func() {
-		_, _ = conn.Do("DEL", queue, queue+":processing", queue+":delayed", queue+":recovered", queue+":parked")
-		_ = conn.Close()
-	})
-
-	return env
+	return server
 }
 
 func (e *reliableQueueEnv) record(id string) {
@@ -181,7 +196,11 @@ func (e *reliableQueueEnv) releaseAll() {
 
 // launch starts a worker and returns a func that stops it gracefully.
 func (e *reliableQueueEnv) launch(concurrency int) func() {
-	worker := e.server.NewWorker("reliable_queue_worker", concurrency)
+	return e.launchOn(e.server, concurrency)
+}
+
+func (e *reliableQueueEnv) launchOn(server *machinery.Server, concurrency int) func() {
+	worker := server.NewWorker("reliable_queue_worker", concurrency)
 	errorsChan := make(chan error, 1)
 	worker.LaunchAsync(errorsChan)
 
@@ -236,7 +255,29 @@ func (e *reliableQueueEnv) ids(key string) []string {
 	return ids
 }
 
-func (e *reliableQueueEnv) processingKey() string { return e.queue + ":processing" }
+// processingKey is the processing list of the env's first server.
+func (e *reliableQueueEnv) processingKey() string { return e.processingKeyOf(e.server) }
+
+func (e *reliableQueueEnv) processingKeyOf(server *machinery.Server) string {
+	return e.queue + ":processing:" + server.GetBroker().(*redisbroker.Broker).ConsumerID()
+}
+
+// deadList registers a consumer without a heartbeat, as if its process was killed, and
+// returns its processing list.
+func (e *reliableQueueEnv) deadList(consumerID string) string {
+	if _, err := e.conn.Do("SADD", e.queue+":consumers", consumerID); err != nil {
+		e.t.Fatal(err)
+	}
+	return e.queue + ":processing:" + consumerID
+}
+
+func (e *reliableQueueEnv) isConsumer(consumerID string) bool {
+	member, err := redis.Bool(e.conn.Do("SISMEMBER", e.queue+":consumers", consumerID))
+	if err != nil {
+		e.t.Fatal(err)
+	}
+	return member
+}
 
 func (e *reliableQueueEnv) waitStarted(id string) {
 	select {
@@ -277,10 +318,11 @@ func TestRedisReliableQueue_AckEmptiesProcessingList(t *testing.T) {
 	})
 }
 
-func TestRedisReliableQueue_RecoversLeftoverTasksInOrderOnStart(t *testing.T) {
+func TestRedisReliableQueue_RecoversDeadConsumerInOrderOnStart(t *testing.T) {
 	env := newReliableQueueEnv(t)
-	env.push(env.processingKey(), env.signature("record", "left-1"))
-	env.push(env.processingKey(), env.signature("record", "left-2"))
+	dead := env.deadList("dead")
+	env.push(dead, env.signature("record", "left-1"))
+	env.push(dead, env.signature("record", "left-2"))
 	env.push(env.queue, env.signature("record", "waiting"))
 
 	defer env.launch(1)()
@@ -289,8 +331,9 @@ func TestRedisReliableQueue_RecoversLeftoverTasksInOrderOnStart(t *testing.T) {
 	if got := env.runs(); !equalIds(got, "left-1", "left-2", "waiting") {
 		t.Errorf("ran %v, want [left-1 left-2 waiting]", got)
 	}
-	eventually(t, "both lists are empty", func() bool {
-		return len(env.ids(env.queue)) == 0 && len(env.ids(env.processingKey())) == 0
+	eventually(t, "the lists are empty and the dead consumer is forgotten", func() bool {
+		return len(env.ids(env.queue)) == 0 && len(env.ids(env.processingKey())) == 0 &&
+			len(env.ids(dead)) == 0 && !env.isConsumer("dead")
 	})
 }
 
@@ -467,7 +510,7 @@ func (e *reliableQueueEnv) recoveries(signature *tasks.Signature) int {
 func TestRedisReliableQueue_CountsRecoveriesAndResetsThemOnAck(t *testing.T) {
 	env := newReliableQueueEnv(t)
 	left := env.signature("record", "left")
-	env.push(env.processingKey(), left)
+	env.push(env.deadList("dead"), left)
 	if _, err := env.conn.Do("HSET", env.queue+":recovered", left.UUID, 1); err != nil {
 		t.Fatal(err)
 	}
@@ -487,8 +530,9 @@ func TestRedisReliableQueue_ParksTaskOnThirdRecovery(t *testing.T) {
 	env := newReliableQueueEnv(t)
 	poison := env.signature("record", "poison")
 	healthy := env.signature("record", "healthy")
-	env.push(env.processingKey(), healthy)
-	env.push(env.processingKey(), poison)
+	dead := env.deadList("dead")
+	env.push(dead, healthy)
+	env.push(dead, poison)
 	if _, err := env.conn.Do("HSET", env.queue+":recovered", poison.UUID, 2); err != nil {
 		t.Fatal(err)
 	}
@@ -562,5 +606,110 @@ func TestRedisReliableQueue_ListsRequeuesAndDeletesParkedTasks(t *testing.T) {
 	eventually(t, "the requeued task ran", func() bool { return env.runCount("first") == 1 })
 	if env.runCount("second") != 0 {
 		t.Error("the deleted task ran")
+	}
+}
+
+func TestRedisReliableQueue_TwoWorkersNeverShareARunningTask(t *testing.T) {
+	env := newReliableQueueEnv(t)
+	defer env.launch(1)()
+	defer env.releaseAll()
+
+	env.send(env.signature("block", "running"))
+	env.waitStarted("running")
+
+	// A second worker starts while the first is busy, as during a deploy.
+	second := env.newServer()
+	defer env.launchOn(second, 1)()
+
+	// The busy first worker takes up to three of these ahead (one per slot, one buffered, one
+	// being handed over); the second runs the rest.
+	for _, id := range []string{"new-1", "new-2", "new-3", "new-4"} {
+		env.send(env.signature("record", id))
+	}
+	eventually(t, "the second worker picks up new work", func() bool { return len(env.runs()) >= 2 })
+
+	// Well past the heartbeat TTL, the running task still belongs to the first worker only.
+	time.Sleep(time.Second)
+	count := func(ids []string) int {
+		n := 0
+		for _, id := range ids {
+			if id == "running" {
+				n++
+			}
+		}
+		return n
+	}
+	if n := count(env.ids(env.processingKey())); n != 1 {
+		t.Errorf("first worker's list holds the running task %d times, want 1", n)
+	}
+	if n := count(env.ids(env.processingKeyOf(second))) + count(env.ids(env.queue)); n != 0 {
+		t.Errorf("the running task is %d times in the queue or the second worker's list, want 0", n)
+	}
+
+	env.releaseOne("running")
+	eventually(t, "every task ran and was acked", func() bool {
+		return len(env.runs()) == 5 && len(env.ids(env.processingKey())) == 0 && len(env.ids(env.processingKeyOf(second))) == 0
+	})
+	if n := env.runCount("running"); n != 1 {
+		t.Errorf("running task ran %d times, want 1", n)
+	}
+}
+
+func TestRedisReliableQueue_RecoversConsumerThatDiesLater(t *testing.T) {
+	env := newReliableQueueEnv(t)
+	defer env.launch(1)()
+
+	// Registered after startup, so only the periodic check can find it.
+	time.Sleep(200 * time.Millisecond)
+	env.push(env.deadList("dead"), env.signature("record", "orphan"))
+
+	eventually(t, "the orphaned task ran", func() bool { return env.runCount("orphan") == 1 })
+	eventually(t, "the dead consumer is forgotten", func() bool { return !env.isConsumer("dead") })
+}
+
+func TestRedisReliableQueue_LeavesLiveConsumersAlone(t *testing.T) {
+	env := newReliableQueueEnv(t)
+	alive := env.deadList("alive")
+	if _, err := env.conn.Do("SET", env.queue+":consumer:alive", 1, "PX", 10000); err != nil {
+		t.Fatal(err)
+	}
+	env.push(alive, env.signature("record", "busy"))
+
+	defer env.launch(1)()
+
+	time.Sleep(time.Second)
+	if got := env.ids(alive); !equalIds(got, "busy") {
+		t.Errorf("live consumer's list is %v, want [busy]", got)
+	}
+	if env.runCount("busy") != 0 {
+		t.Error("a live consumer's task ran elsewhere")
+	}
+}
+
+func TestRedisReliableQueue_HeartbeatOutlivesTTLAndStopUnregisters(t *testing.T) {
+	env := newReliableQueueEnv(t)
+	stop := env.launch(1)
+	defer stop()
+
+	id := env.server.GetBroker().(*redisbroker.Broker).ConsumerID()
+	heartbeat := env.queue + ":consumer:" + id
+	eventually(t, "the worker registers", func() bool { return env.isConsumer(id) })
+
+	time.Sleep(time.Second)
+	alive, err := redis.Bool(env.conn.Do("EXISTS", heartbeat))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !alive {
+		t.Fatal("heartbeat expired while the worker runs")
+	}
+
+	stop()
+	alive, err = redis.Bool(env.conn.Do("EXISTS", heartbeat))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if alive || env.isConsumer(id) {
+		t.Error("a stopped worker is still registered")
 	}
 }
